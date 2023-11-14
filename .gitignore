@@ -1,0 +1,6 @@
+# ignore data sets
+data_optimization/
+
+# ignore files build by reporting functionality
+results_optimization/
+
