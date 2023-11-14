@@ -1,0 +1,1025 @@
+\documentclass[3p]{elsarticle}
+
+% Imports
+\usepackage{lineno,hyperref}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{multirow}
+\usepackage{subfig}
+\usepackage{graphicx}
+\usepackage{interval}
+\usepackage{comment}
+\usepackage{lipsum}
+\usepackage{xcolor}
+\modulolinenumbers[5]
+
+% Math redefinitions
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\C}{\mathbb{C}}
+\newcommand{\Z}{\mathbb{Z}}
+\newcommand{\N}{\mathbb{N}_0}
+\newcommand{\Lc}{\mathcal{L}}
+\newcommand{\sign}{\operatorname{sign}}
+\newcommand{\nmix}{n_{\text{mix}}}
+\newcommand{\nobs}{n_{\text{obs}}}
+\newcommand{\phobs}{\varphi^{\text{obs}}}
+\newcommand{\zobs}{z^{\text{obs}}}
+\newcommand{\hatphi}{\hat{\varphi}}
+\newcommand{\modminus}{-_{\operatorname{mod}}}
+\newcommand{\modplus}{+_{\operatorname{mod}}}
+\newcommand{\pe}{p_{\epsilon}}
+\newcommand{\atan}{\operatorname{atan2}}
+
+
+\newcommand{\erTH}{\varepsilon_\mathrm{TH}}
+
+\newcommand{\bbm}{\begin{bmatrix}}
+\newcommand{\ebm}{\end{bmatrix}}
+
+\newproof{pf}{Proof}
+\newtheorem{thm}{Theorem}
+\newtheorem{lem}[thm]{Lemma}
+
+
+\journal{ISPRS Journal of Photogrammetry and Remote Sensing}
+\bibliographystyle{elsarticle-num}
+
+
+
+%%%%%%%%%%%%%%%%%%%%%%%
+
+\begin{document}
+\begin{frontmatter}
+
+%\title{Phase ambiguity resolution and multi-target detection in non-coherent distance measurement with multiple modulation wavelengths}
+\title{Phase ambiguity resolution and mixed pixel detection in EDM with multiple modulation wavelengths}
+
+
+%% Group authors per affiliation:
+\author{Jemil Avers Butt}
+\author{David Salido-Monz\'u}
+\author{\corref{mycorrespondingauthor}Andreas Wieser}
+\cortext[mycorrespondingauthor]{Corresponding author}
+\ead{andreas.wieser@geod.baug.ethz.ch}
+
+
+
+%% or include affiliations in footnotes:
+%\ead[url]{https://gseg.igp.ethz.ch}
+
+
+
+\address{ETH Z\"{u}rich, Institute of Geodesy and Photogrammetry, Stefano-Franscini-Platz 5, 8093 Z\"{u}rich, Switzerland}
+
+
+\begin{abstract}
+Distance measurement based on the accumulated phase of intensity-modulated continuous-wave lasers is an established approach for pointwise geometry acquisition in uncontrolled conditions, enabling some of the most accurate Lidar/laser-scanning solutions. Inherently affected by cycle ambiguities due to the modulo 2$\pi$ phase observations, several modulation wavelengths are typically used in practical implementations to extend the measurement range. One of the main limitations of these systems arises from their inability to decouple mixed signals affected by different delays. This is especially relevant when the laser beam illuminates simultaneously two or more surfaces at significantly different distances, producing mixed-pixel measurements in which the estimated distance does not reliably correspond to any of the involved scatterers. Algorithms for detection and filtering of mixed pixels within point-cloud data have been proposed based on analyzing consistency across local neighborhoods. The resolution of multiple scatterers on individual measurements, however, has not been yet reported nor is provided by undisclosed commercial implementations. In this work, we analyze the problem of signal mixing in multi-wavelength phase-based distance estimation, and propose an algorithm for joint phase ambiguity resolution and mixed pixel detection based on mixed integer linear programming. We first analyze theoretically the performance limits of the proposed solution, demonstrating unbiasedness in the presence of noise and robustness in the presence of multiple scatterers. In addition, we investigate empirically the impact of noise, mixed measurements and choice of modulation wavelengths on the performance of the proposed algorithm. The results demonstrate the capacity of the presented approach, given an adequate wavelength selection, to provide unambiguous distance estimates under realistic noise conditions and to identify measurements affected by mixed pixels while approximating the position of the dominant scatterer. Aside from contributing to improving the reliability and resolution capability of Lidar and laser-scanning data, the proposed solution sets a promising step towards fully resolved multi-target distance measurement.
+\end{abstract}
+
+\begin{keyword}
+Electro-optical distance measurement (EDM) \sep Phase measurement \sep Ambiguity resolution \sep Mixed pixel \sep Mixed integer linear programming
+%\MSC[2010] 42A82, 46E22, 62J10
+\end{keyword}
+
+\end{frontmatter}
+
+\linenumbers
+
+\section{Introduction}
+
+Electro-optical distance measurement (EDM) technology encompasses several laser-based non-coherent methods for contactless range estimation in the presence of unregulated atmosphere and unprepared environments. Combined with angular encoders and controlled beam pointing or deflection, it can provide 3d measurements on m-to-km scales with relative accuracies within $10^{-4}$ to $10^{-6}$ and provides a central component to ubiquitous measurements instruments such as total stations and laser scanners. EDM to cooperative targets—typically corner-cube prisms or retroreflectors—can reach sub-mm accuracy over several hundred meters with adequate meteorological compensation, and is routinely used for dimensional control, deformation monitoring, and position determination on industrial, geodetic, and civil engineering applications. Sacrificing accuracy for versatility and speed, measurements using the diffuse reflection of the laser beam on natural surfaces can also be carried out, enabling rapid 3d digitization of the environment through Lidar/laser-scanning.
+
+EDM generally relies on observing some measure of delay encoding the distance of propagation being covered by the optical signal between measurement instrument and backreflecting target making use of different established approaches \cite{Rueger2012}. The most extended solutions are based on observations of either the Time-of-Flight (ToF) of a pulsed laser or the accumulated phase of sinusoidal intensity modulations on a continuous-wave laser. The latter provides higher effective signal-to-noise ratio (SNR) under similar detection conditions but is restricted to shorter ranges due to laser-safety regulations, making it the method of choice for many implementations prioritizing accuracy. The main practical limitations of phase-based EDM compared to ToF arise from a) the inherent cycle ambiguity introduced by the modulo $2\pi$ observations on the modulated tones, and b) the inability to decouple partial delays corresponding to targets at grossly different positions measured simultaneously on the so-called mixed-pixel scenarios \cite{godbaz2013understanding,hodge2010using}.
+
+The ambiguity problem is routinely solved by combining several modulation wavelengths and processing the measured phases jointly, producing distance estimates based on several phase observations and whose ambiguity range is much larger than that of the individual wavelengths. Measurements affected by mixed pixels, on the other hand, are normally addressed at the point cloud level using neighbouring contextual information such as point distribution and intensity variations to filter out measurements that do not uniquely correspond to a clearly defined target \cite{adams1996interpretation,wang2016development,wang2020computational}. Many commercial laser scanners are known to operate based on phase measurements at various modulation frequencies, therefore implementing some ambiguity resolution approach in the estimation process. Despite the lack of information from manufacturers on the implemented algorithms, inspection of the raw data produced by these systems shows that current solutions cannot resolve mixed pixels on independent measurements. The identification and resolution of multiple targets at the individual measurement level have not been yet demonstrated to the best of the authors' knowledge.
+
+Ambiguity resolution is required and applied in various other metrological contexts. High-accuracy GNSS measurements make use of carrier-phase observations to improve the delay estimations obtained from the pseudo-codes correlation. This requires solving the cycle ambiguity of the GHz microwave carriers, which is generally achieved by combining the pseudo-code measurements with the observations at the various carrier frequencies \cite{Kim2000,Teunissen2003}. Pulse Doppler radar combining pulse and continuous-wave measurements are also subject to range and frequency ambiguities depending on the pulse repetition frequency (PRF). These ambiguities are resolved from the combination of simultaneous observations at different PRFs, typically following approaches based on the Chinese remainder theorem \cite{Lin2001,Feixing2006}. Pulsed and photon-counting Lidar are subject to similar ambiguities when the maximum range is larger than the pulse repetition range. When allowed by the dynamic requirements of the application, this is solved employing pseudo-random modulations and matched filter detectors to extend the ambiguity range \cite{Krichel2010}, whereas post-processing-based algorithms resolve the ambiguity by analyzing consistency within clusters of neighboring points.
+ 
+The problem of signal mixing due to multiple propagation paths is also prevalent in several ranging technologies aside from EDM. In most of these technologies a clearly defined path of interest can be defined, typically corresponding to the line-of-sight between non-collocated emitters and receivers and thus associated to the shortest delay. The mixing problem is therein referred to as multipath interferences, and a significant research effort has been devoted to their mitigation over the past decades. The vast majority of this research has been focused on multipath mitigation within GNSS, generally relying on exploiting the pseudo-code correlation properties to optimize the discrimination functions and tracking loops to provide multipath rejection \cite{Dierendonck1992,Braasch2001a,Wu2011} or to estimate several components with multiple delays simultaneously \cite{VanNee1992,Weill2002,Chen2011}. For measurement principles that rely on direct delay measurements, enhancing multipath rejection depends directly on increasing the capacity of the system for discriminating multiple delayed signals, which is in turn determined by the time resolution defined by the detection system and the measurement signal itself \cite{Dardari2009,Zhang2009}. Multipath has been also investigated in the context of interferometric distance metrology by including spread-spectrum modulations on the optical probing signals, targeting both isolation of individual components and multi-target measurements \cite{Shaddock2007,Vine2010,Isleif2014}. None of the above approaches to ambiguity resolution or multipath mitigation, however, rely solely on phase observations while specifically accounting for measurements corresponding to more than one dominant delay without altering the signal architecture to enable correlation-based measurements. Developing a solution for purely phase-based EDM in mixed-pixel settings therefore requires an independent problem formulation.
+  
+ \begin{comment}
+ \vspace{.5cm}Signal mixing in other ranging applications: multipath interferences (non-colocated Tx-Rx):
+  \begin{itemize}
+     \item Time-resolved approaches: US (trivial), UWB [Wu'07,Dadari'09,Zhang'09]
+     \item Multipath mitigation in GNSS (rely in general on the code correlation E-L properties):
+     \begin{itemize}
+         \item Correlation and discrimination functions optimized for multipath rejection (significant effective SNR reduction on carrier phases) [vanDierendonck'92,Braasch'01,Nunes'07,Wu'11]
+         \item Multipath-estimating DLLs (operate on both code and carrier and estimate various components, but rely fundamentally on discrimination at the DLL level->codes) [vanNee'92,Weill'02,Fenton'05,Chen'11]
+         \item XXX-Discuss with AW on current trends-XXX
+     \end{itemize}
+     \item Multipath mitigation in interferometry: "digitally-enhanced interferometry" time gating based on speading/despreading w/ BPSK [Lay'07,Shaddock'07, deVine'09,Isleif'14]
+ \end{itemize}
+\end{comment}
+
+We hereby analyze the problem of semantic-free ambiguity resolution and detection of mixed-pixels using only phase observations and propose a solution algorithm based on mixed integer linear programming. Aside from real-time signaling and correction of faulty measurements involving multiple scatterers, so far unavailable without using extended context information, the mixed-pixel detection demonstrated herein may enable increased resolution capability \cite{lichti2006angular,schmitz2020investigating} and improved edge detection \cite{wang2019development} on the resulting point cloud data. The presented analysis and discussion also contribute to better understanding the mathematical implications of signal mixing in multi-wavelength phase estimation, and relating performance bounds with the underlying mixing setting and wavelength configuration, thus establishing a basis for the optimal selection of the latter. Additionally, the proposed algorithm is available as an open solution that can be used for further research and optimization of phase-based EDM solutions, and for evaluation and direct comparison of prospective alternatives with respect to noise and mixed-pixel performance.
+
+The rest of this paper is organized as follows: XXX.
+
+
+
+\section{Ambiguity resolution problem}
+%\begin{itemize}
+%    \item IQ model and analysis of limit cases
+%    \item Full observation equations in comlex space
+%    \item criteria for a joint solution
+%    \item Real-valued reformulation
+%\end{itemize}
+
+\subsection{Phase behavior according to the I-Q Model}
+
+One-dimensional electromagnetic waves of a fixed frequency $f\in \R$ and wavenumber $k\in \R$ are representable as complex numbers $z \in \C$ in what is known as phasor arithmetic. One may associate to a wave $\phi_1:T\times X \ni (t,x)\mapsto a_1\cos\left(\langle k, x\rangle_{\R}-2 \pi f t +\varphi_0^1\right)$ with amplitude $a_1$ and phase shift $\varphi_0^1$ the real part of the complex-valued function $$\tilde{z}_1(t)=a_1\exp\left( i \langle k,x\rangle_{\R}-2\pi f t +\varphi_0^1)\right)=a_1\exp\left(i\varphi_0^1\right)g(t,x).$$ The term $z(\phi_1)=a_1\exp\left(i\varphi_0^1\right)$ is constant in time and aggregates the information about amplitude and phaseshift of the wave whereas the complex function $g(t,x)$ of unit norm determines the spatiotemporal aspects of the wave. For two waves $\phi_1,\phi_2$ featuring different amplitudes and phaseshifts but coinciding frequencies and wavenumbers, it holds that XXXXXX
+\begin{align}
+    z(\phi_1)+z(\phi_2)&=z(\phi_1+\phi_2) \\
+    z(\phi_1)z(\phi_2)&=z(\phi_1\phi_2) 
+\end{align}
+implying superposition and multiplication of waves to be representable in terms of addition and multiplication in the algebra of complex numbers. An equivalent representation is applicable to sinusoidal signals modulating an optical carrier and directly demodulated upon photodetection, as used in phase-based EDM \cite{Rueger2012}, by replacing frequencies, wavenumbers, and wavelengths with their modulation counterparts. A measurement comparing the phases of the emitted modulation signal $\phi_0$ and the signal $\phi_1$ received with delay $\Delta t_1$ at location $x=0$ can therefore be summarized as 
+\begin{align}
+    z_1=w_1a_0\exp(2\pi i f \Delta t_1)&=w_1 \exp\left(2\pi i f (t+\Delta t_1) + i \varphi_0^1\right) a_0\exp\left(-2 \pi i f(t) - i\varphi_0^1\right) \\
+    &=z(\phi_1(t)\overline{z}(\phi_0(t))
+\end{align}
+for $w_1$ the amplitude of the received signal $\phi_1$. Only the phase $\varphi \in (-\pi,\pi]$ of the complex number $z_1=a\exp\left(i(\varphi+2 \pi N)\right)$ and not the unwrapped phase $\varphi + 2 \pi N, N\in \N$ indicative of the total distance travelled by the wave is subject to observation. To indicate the ambiguity-inducing operation of wrapping a phase $\psi$ to the interval $(-\pi,\pi]$, we write the wrapped phase as $\mod^*(\psi,2\pi):=\varphi \in (-\pi,\pi]:\varphi+2\pi N =\psi, N\in \N$ with the additional notation
+$$\varphi_1\modplus \varphi_2:=\mod^*(\varphi_1+\varphi_2,2\pi)~~~~~\varphi_1\modminus \varphi_2:=\mod^*(\varphi_1-\varphi_2,2\pi)$$
+introduced to reduce notational clutter. We overload the symbol $\varphi$ by also using it as the angle function $\varphi(\cdot):\C \rightarrow (-\pi,\pi]$ mapping complex numbers to their phases which it does so by employing the two-argument inverse tangent $\atan(y,x) $ which for reasons of readability will also be written as $\atan\left(\frac{y}{x}\right)$. More information on the relationship between complex numbers, the inverse tangent and the $\mod$-operation can be found in \cite[p.~15]{Mardia2009}
+
+A single measurement determines the distance $d$ between emitter and reflecting surface only up to a multiple of the wavelength. The task of determining the integer number of of full wavecycles $N \in \N$ and thereby the distance $d$ is usually called the ambiguity resolution problem XXXXX and its solution relies on additional measurements or a priori information from otherwise accessible sources.
+
+In the presence of several surfaces $S_l, l=1, ... ,\nmix$ scattering the signal back to the receiving device, the superposition $\sum_{l=1}^{\nmix} \phi_l(t)=\sum_{l=1}^{\nmix} w_l\phi_0(t+\Delta t_l)$ of received waves yields the observation $z_{\text{obs}}=\sum_{l=1}^{\nmix} z(\phi_l)\overline{z}(\phi_0)=\left[\sum_{l=1}^{\nmix}a_0w_l\exp\left(2 \pi i f \Delta t_l\right)\right]  = \sum_{l=1}^{\nmix}z_l$ whose phase 
+\begin{align}
+\varphi(\zobs)=\atan\left(\frac{\sum_{l=1}^{\nmix} w_l \sin(2 \pi f \Delta t_l)}{\sum_{l=1}^{\nmix} w_l \cos(2 \pi f \Delta t_l)}\right)
+\end{align}
+typically corresponds to neither of the distances $d_k$ to the surfaces $S_l$ for $\nmix \ge 2$; see figure \ref{fig:2.1} for an illustration.
+
+\begin{figure}[h]
+	\includegraphics[width=\textwidth]{./Images/Superposition3.jpg}
+	\caption{The leftmost panel illustrates the phenomenon of phase-based EDM measurements being equivalent to superpositions of waves scattered back from different surfaces. These waves are representable as complex numbers and the total phase resulting from their superposition depends nonlinearly on the amplitudes and phases of the representing complex numbers. Addition of a complex number $z_2$ to a complex number $z_1$ of higher magnitude only influences the phase of the sum in a bounded manner with the bound $|\Delta \psi|$ becoming tighter for bigger quotients $w_1/w_2$ \textemdash see the panel located in the center. Details of that influence can be seen in the right panel which depicts the phase of the sum for different values of this quotient and changing values of $\varphi_2(\Delta d_{12})$. Notice the different scales in these plots. }
+	\label{fig:2.1} 
+\end{figure}
+
+
+The phasor model permits some straightforward considerations for the simple but typical case where the observation $\zobs$ represents a superposition of $\nmix =2$ waves scattered back from two surfaces $S_1, S_2$ whose distances $d_1,d_2$ to the sensor differ by $\Delta d_{12} = d_2-d_1$. This situation occurs when measurements are performed on edges of objects in front of a background with non-negligible reflection characteristics. Measurements resulting from multiple waves scattered back from surfaces in different distances are sometimes called \textit{'mixed pixels'} in the EDM literature XXXXX; a term we will adopt for the remainder of the paper. Suppose
+\begin{align}
+    \zobs &= z_1+z_2 ~~~~~~ z_l=w_le^{i\varphi_l}
+\end{align}
+and consider for the sake of illustration the center panel in figure \ref{fig:2.1}. For $w_1>w_2$, the phase $\phobs$ of $\zobs= w_{\text{obs}}\exp(i\phobs)$ can be bounded as $\phobs =\varphi_1 \pm \Delta \psi$ by finding the cone enveloping a circle around $z_1$ with radius $w_2$. Two-dimensional geometrical considerations in a coordinate system whose axis is aligned with $z_1$ reveals the rays of the cone to be lines through the origin orthogonal to $w_2[\cos(\varphi_2),\sin(\varphi_2)]^T$ and intersecting $z_1+z_2$ at locations $[a,b]$. Posing and solving the associated system of equations yields
+\begin{align}
+    \langle \bbm a \\ b \ebm , \bbm \cos(\varphi_2) \\ \sin(\varphi_2) \ebm \rangle  = 0 ~~~&~~~ \bbm a \\ b \ebm = \bbm w_1 +w_2 \cos(\varphi_2) \\ w_2 \sin (\varphi_2) \ebm \\
+    \label{eqn:psi_bound}
+    \Delta \psi = |\arccos(-w_2 / w_1)|-\pi/2~~~&~~~|\Delta \psi|=|\pi/2-\arccos(w_2/w_1)|
+\end{align}
+where $\varphi_2=\Delta \psi + \pi/2$ and  $a,b$ are the 3 unknowns to be determined. Consequently $\phobs$ is constrained to take values in the interval $\Phi:=[\varphi_1 - \Delta \psi, \varphi_1 +\Delta \psi]$ irrespective of the actual value of $\varphi_2$. Subsequently, the following limit cases are straightforward to derive \cite[p. 120]{Olver2010}
+\begin{align}
+    \lim_{w_2/w_1 \rightarrow 0} \Delta \psi &=\pi/2-\pi/2 = 0 \\
+    \lim_{w_2/w_1 \rightarrow 1} \Delta \psi & = \pi -\pi/2 = \pi/2
+\end{align}
+For $w_2/w_1 >1$, one finds $$\lim_{w_2/w_1 \rightarrow \infty } \phobs = \lim_{w_2/w_1\rightarrow \infty} \arctan\left(\sum_{l=1}^2 w_l \sin(\varphi_l) / \sum_{l=1}^2 w_l \cos(\varphi_l) \right)=\arctan(\sin(\varphi_2) / \cos(\varphi_2))=\varphi_2$$ due to the continuity of the inverse tangent function. The potentially observable phases depend nonlinearly on the weight ratio with values in the complement of $[\varphi_1 -\pi/2,\varphi_1 +\pi/2]$ unobservable for any possible $\varphi_2 \in [-\pi,\pi]$ unless $w_2 \ge w_1$. On the other hand, these considerations imply that for $w_2 < w_1$ and $\varphi_2$ ranging from $-\pi$ to $\pi$, $\phobs(\varphi_1,\varphi_2)$ varies around $\varphi_1$ bounded by $\pm \Delta \psi$ and its expected value for uniformly random $\varphi_2 \sim \mathcal{U}[-\pi,\pi]$ is $E_{\varphi_2}[\phobs]=\int_{-\pi}^{\pi} \phobs(\varphi_1,\varphi_2)d\varphi_2=\varphi_1$ due to symmetry. \\
+
+
+\subsection{Observation equations}
+
+In what follows, it will be assumed that any weights $w_k$ in the weighted sum $\zobs=\sum_{l=1}^{\nmix} w_kz_k$ are independent of the modulation wavelength $\lambda$ used to perform the measurements and that furthermore the reflecting surface does not impart any phase shift on backscattered waves such that the observation equation for the measurements may be written as
+\begin{align}
+    \zobs(\lambda) &=\sum_{l=1}^{\nmix} w_lz_l(\lambda) \\
+    z_l &=\exp\left( 2 \pi i \left(\frac{2 d_l}{\lambda} - N_l(\lambda)\right)\right) = \exp\left(i \varphi_l(\lambda)\right)
+\end{align}
+In the above, $|z_l|=1$, the $d_l \in \R_+$ are the distances between sensor and surface $S_l$ and $N_l \in \N$ for $l=1 , ... ,\nmix$. Suppose $\zobs$ is observed for the $\nobs$ different wavelengths $\{\lambda_k\}_{k=1}^{\nobs}$ via its phase value $\varphi_k$ and amplitude $a_k$ as encoded in the observation equation
+\begin{align}
+\label{eqn:observation}
+    z&= Q w ~~~~ Q\in \C^{\nobs}\times \C^{\nmix} , w\in \R_+^{\nmix}
+\end{align}
+where $(z)_k =a_k\exp\left( i \varphi_k^{\text{obs}}\right) $ are the observations, $Q$ with $(Q)_{kl}=\exp(i\varphi_{kl})$ is a matrix of complex numbers with unit norm representing the phase $\varphi_{kl}$ contributed to the $k$-th observation gathered with wavelength $\lambda_k$ by the reflecting surface $S_l$ in distance $d_l$ with reflectance $w_l$. Equation \eqref{eqn:observation} is a system of $2 \nobs$ equations linking the real and imaginary parts of the observations $(z)_k=\zobs(\lambda_k)$ to the $\nmix(\nobs+1)$ unknowns $w_l, l=1, ... ,\nmix$ and $\varphi_{kl}, k=1, ... ,\nobs, l=1, .... ,\nmix$. Denoting by $\varphi(\cdot):\C^{\nobs} \rightarrow (-\pi,\pi]^{\nobs}$ the angle function mapping complex numbers to their phases, Eq. \eqref{eqn:observation} suggests the term 
+\begin{align}
+\|\varphi(z)\modminus\varphi(Qw)\|_1&=\sum_{k=1}^{\nobs} |\phobs_k \modminus \varphi(Qw)|=\sum_{k=1}^{\nobs}\left|\phobs_k \modminus \atan \left( \frac{\sum_{l=1}^{\nmix} w_l \sin\varphi_l(\lambda_k)}{\sum_{l=1}^{\nmix} w_l \cos \varphi_l(\lambda_k)}\right)\right|
+\end{align}
+as a measure of discrepancy for evaluating how closely the predicted phase observations $\varphi(Qw)$ match the actually observed ones recorded in $\varphi(z), z\in \C^{\nobs}$.
+
+Note that for $\nmix \ge 2$, the $\nmix \nobs$ equations are constraining $\nmix \nobs +\nmix$ unknowns. In this case, the system is underdetermined and the consistency criterion $\|\varphi(z)\modminus \varphi(Qw)\|_1\rightarrow \min$ typically permits multiple solutions $w^{\ast}\in \R^{\nmix}_+, \hat{\varphi}\in \R^{\nobs}\times \R^{\nmix} $ for $(\hat{\varphi})_{kl}=\varphi_{kl}$ and $Q=:e^{i\hatphi}$ with  $(Q)_{kl}=\exp(i\varphi_{kl})$. When $\nmix=1$, a solution can be found as
+\begin{align}
+    w^*,\hatphi^* & =\underset{w_1\in \R_+ \hatphi\in \R^{\nobs}}{\operatorname{argmin}}\|\varphi(z)\modminus \varphi(e^{i\hatphi}w)\|_1 \\
+    w^* &>0 \text{ any arbitrary positive number}\\
+    \label{eqn:phi_optimal}
+    \hatphi^*&=[\varphi_1^{\text{obs}}, ... ,\varphi_{\nobs}^{\text{obs}}]^T\in (-\pi,\pi]^{\nobs}.
+\end{align}
+This follows from 
+\begin{align}
+\label{eqn:trivial_min}
+    \|\varphi(z)\modminus \varphi (e^{i\hatphi}w) \|_1& =\sum_{k=1}^{\nobs}|\phobs_k\modminus\varphi(w_1 e^{i\varphi_k})|=\sum_{k=1}^{\nobs}|\phobs_k \modminus\hatphi_k|    
+\end{align}
+whose minimum is attained for $\hatphi_k=\phobs_k$ with objective value $\|\varphi(z)\modminus \varphi(e^{i\phobs}w)\|_1=0$. The best guesses for the phases are simply the observed ones in this case.
+
+For situations involving mixed pixels, the consistency criterion is not enough to determine $\hatphi$ and $w$ and needs to be supplemented by a term measuring the discrepancy between the fictitious measurements $\varphi_{kl}$ assumed in $Qw=z$ and what is well explainable via the received signal being a superposition of  measurements to $\nmix$ surface $S_l$ in distances $d_l$ to the sensor. For jointly estimating $\{w_l\}_{l=1}^{\nmix} \subset \R_+, \{d_l\}_{l=1}^{\nmix}\subset \R_+, \{\varphi_{kl}\}_{(k,l)=(1,1)}^{(\nobs,\nmix)}\subset[-\pi,\pi]$ and the numbers of full wavecycles $\{N_{kl}\}_{(k,l)=(1,1)}^{(\nobs,\nmix)} \subset \N$ based on measurements of amplitudes $a_k$ and phases $\varphi^{\text{obs}}_k$ in form of the vector $z\in \C^{\nobs}$ with $(z)_k=a_ke^{i\varphi_k^{\text{obs}}}$, we propose to solve an optimization problem in the optimization variables $\hatphi, d,w,N$ that takes on the following form.
+
+\begin{align}
+\label{eqn:abstract_optimization}
+    \underset{\hatphi,d}{\min} ~~~~ & \mathcal{L}_1(\hatphi,\phobs)+\mathcal{L}_2(\hatphi,d)
+\end{align}
+$\mathcal{L}_1(\hatphi,\phobs)$ measures how well a certain candidate decomposition $\hatphi \in \R^{\nobs}\times \R^{\nmix}$ of fictitious phase measurements $\varphi_{kl}$ with wavelength $\lambda_k$ towards a surface in distance $d_l$ explains the observed mixed phases $\phobs$. $\mathcal{L}_2(\hatphi,d)$ in turn quantifies, how well any set of $\nmix$ distances $d_1, ..., d_{\nmix}$ explains the candidate decomposition $\hatphi$. The goal of Equation \eqref{eqn:abstract_optimization} is to find that decomposition $\hatphi$ into individual phases and the associated distances $d_1, ... ,d_{\nmix}$ that overall best fit the observed phases $\phobs$.
+If possible, both $\Lc_1$ and $\Lc_2$ should be interpretable as the likelihood of residuals. Under the assumption that the measurement uncertainty is independent of wavelength, examples of stochastically meaningful choices would be the $\ell^p$-norms $\|\cdot\|_p:\R^{\nobs}\rightarrow \R_+$
+\begin{align}
+\label{eqn:nonlinear_optimization}
+    \Lc_1=\|\varphi_{\text{mix}}(\hatphi)-\phobs\|_p^p ~~~~~& \Lc_2=\frac{1}{\nmix}\sum_{l=1}^{\nmix} \|\varphi(d_l)-\hatphi_l\|_p^p
+\end{align}
+of the phase residuals where $\varphi_{\text{mix}}(\hatphi) \in \R^{\nobs}$ with $k$-th entry $\atan\left(\sum_{l=1}^{\nmix}w_l\sin\hatphi_{kl}/\sum_{l=1}^{\nmix}w_l\cos\hatphi_{kl}\right)$, $\hatphi_l=\left[\hatphi_{1l}, ... ,\hatphi_{\nobs l}\right]^T\in \R^{\nobs} $ and $\varphi(d_l) \in \R^{\nobs}$ with $k$-th entry $\mod(4 \pi (d_l/\lambda_{k}),2\pi)-\pi$. This would correspond to assuming the phase residuals to be Laplace $(p=1)$, Gaussian $(p=2)$, or uniformly $(p=\infty)$ distributed XXXXXXX. The strong nonlinearities in the definition of $\varphi_{\text{mix}}(\hatphi)$ and $\varphi(d_l)$ w.r.t. the optimization variables $\hatphi$ and $d_1, ... ,d_{\text{mix}}$ necessitate a less stochastically rigorous but more analytically tractable approach featuring the $\ell^1$-norm for simplicity and robustness. We provide the following formulation for the joint ambiguity resolution and unmixing problem in term of an optimization problem in the variables $d_l, w_l, \vec{N}_l.$ and $\hat{\varphi}_l$.
+
+
+
+\begin{align}
+    \min ~~~~& \underbrace{\|\varphi(z)\modminus \varphi(Qw)\|_1}_{\mathcal{L}_1(\hatphi,w)}+\frac{1}{\nmix}\underbrace{\sum_{l=1}^{\nmix} \|2 \pi \left(2\Lambda^{-1} \vec{d}_l -\vec{N}_l\right)-\hat{\varphi}_l\|_1}_{\mathcal{L}_2(\hatphi,d,N)} \nonumber \\
+    s.t ~~~~& d_l\ge 0, w_l \ge 0 \text{ for } l=1, ...,\nmix \nonumber\\
+    \label{eqn:concrete_optimization}
+    &\vec{N}_l\in \N^{\nobs} \text{ for } l=1, ...,\nmix \nonumber\\
+    &\hat{\varphi}_l \in (-\pi,\pi]^{\nobs} \text{ for } l=1, ...,\nmix
+\end{align}
+Here $\Lambda$ is a diagonal $\nobs\times \nobs$ matrix with $(\Lambda)_{kl}=\delta_{kl}\lambda_k$, $\vec{d}_l=[d_l, ... ,d_l]^T\in \R^{\nobs}_+$ and $\vec{N}_l\in \N^{\nobs}$ with $(\vec{N}_l)_k=N_{kl}$. Most importantly, $\hatphi_l\in \R^{\nobs}$ is defined via $(\hatphi_l)_k=\varphi_{kl}$ and features also in the consistency term $\|\varphi(z)\modminus \varphi(Qw)\|_1$ with $z=[a_1e^{i\varphi_1^{\text{obs}}}, ... ,a_1e^{i\varphi_{\nobs}^{\text{obs}}}]^T $ and $Qw=e^{i\hatphi}[w_1, ... ,w_{\nmix}]^T$. 
+
+This minimum is achieved when the decomposition $e^{i \hatphi}w$ is consistent to the measurements $z$ as indicated by the term $\Lc_1=\|\phobs-\varphi(e^{i\hatphi}w)\|_1$ and well explainable by only $\nmix$ distances $d_1, ... ,d_{\nmix}$ leading to small average residuals $\nmix^{-1} \sum_{l=1}^{\nmix}\sum_{k=1}^{\nobs} |2 \pi (2 d_l/\lambda_k-N_{kl})-\hatphi_{kl}|$. Given any values $\tilde{d}_1, ... ,\tilde{d}_{\nmix}$ and $\tilde{w}_1, ... ,\tilde{w}_{\nmix}$ as well as the derived quantities $\tilde{N}_{kl}=\lfloor 2 \tilde{d}_l/\lambda_k\rfloor, \tilde{\varphi}_{kl}=2\pi(2\tilde{d}_l/\lambda_k-\tilde{N}_{kl})$ as the $kl$-th entries of the matrix $\tilde{\varphi}$, and noiseless observations $\tilde{z}=e^{i\tilde{\varphi}} \tilde{w}$, the objective function in Eq. \eqref{eqn:concrete_optimization} $\Lc=\Lc_1(\tilde{\varphi},\tilde{w})+\Lc_2(\tilde{\varphi},\tilde{d},\tilde{N})$ takes on the value $0$. This is a minimum since the objective function consists only of nonnegative terms. $\Lc$ assigns to a solution the correct minimum objective value and discourages solution candidates resulting in discrepancies although an increase in model flexibility (by assuming higher $\nmix$) comes at the cost of potentially nonunique solutions. Equation \eqref{eqn:concrete_optimization} is a mixed integer nonlinear program with nonlinear constraints and could \textemdash following the author's best efforts \textemdash not be solved in all generality. Two special cases are of immediate practical interest.
+\begin{itemize}
+    \item[] \textit{Ambiguity resolution problem} For $\nmix=1$, we showed in Eq.  \eqref{eqn:phi_optimal} that $\hatphi$ minimizing $\|\varphi(z)\modminus \varphi(Qw)\|_1$ is given as $\hatphi = \phobs$. Note furthermore that by the triangle inequality $\|\phobs- \hatphi_1\|_1+\|2\pi (2\Lambda^{-1} \vec{d}_1 -\vec{N}_1)-\hatphi_1\|_1\ge \|2 \pi (2\Lambda^{-1}\vec{d}_1-\vec{N}_1) -\phobs\|_1$ with the lower bound being attained for $\hatphi_1=\phobs$. Solving for $d_1$ can then be done via solving the minimization problem
+    \begin{align}
+        \min ~~~&\|2\pi (2 \Lambda^{-1} \vec{d}_1 - \vec{N}_1) - \phobs\|_1 \nonumber\\
+        \label{eqn:AR_problem}
+        s.t. ~~~& d_1 \ge 0 ~~~~\vec{N}_1 \in \N^{\nobs}
+    \end{align}
+    in the variables $d_1$ and $\vec{N}_1$. This is equivalent to a mixed integer linear program and solvable by publicly available algorithms.
+    
+    \item[] \textit{Mixed pixel resolution problem} For $\nmix =2$, Eq. \eqref{eqn:concrete_optimization} correspond to estimating two distances $d_1$ and $d_2$ separating emitter and surfaces $S_1, S_2$ such that a mixture of measurements to $S_1$ and $S_2$ best explains the observed phases. Instead of solving the joint ambiguity resolution and unmixing problem
+    \begin{align}
+        \min ~~~ & \|\varphi(z)\modminus \varphi(Qw)\|_1 +\frac{1}{2} \left[ \| 2 \pi ( 2\Lambda^{-1} \vec{d}_1 - \vec{N}_1)-\hatphi_1\|_1+ \|2 \pi (2\Lambda^{-1} \vec{d}_2 -\vec{N}_2)-\hatphi_2 \|_1\right] \nonumber \\
+        s.t. ~~~ & d_1,d_2 \ge 0 ~~~~~~ w_1,w_2 \ge 0 ~~~~~~ \vec{N}_1,\vec{N}_2 \in \N^{\nobs}
+    \end{align}
+    in one step, one might aim for a block-coordinate-descent type approach XXXXXXXXXXX, in which the sum $\Lc$ of the two terms $\Lc_1(\hatphi,w)$ and $\Lc_2(\hatphi,d,N)$ is optimized iteratively w.r.t. different sets of variables. Alternatively, one may employ knowledge about one of the distances $d_1$ or $d_2$ to reduce the variables in the problem; a strategy commented on at a later stage in the paper.
+\end{itemize}
+
+
+
+
+\section{A solution based on linear programming}  \label{Sec:MILP}
+\subsection{Mixed integer linear programming}
+%\begin{itemize}
+%    \item L1 norm minimization as an LP
+%    \item AR as a MILP
+%    \item Numerical solution: Methods and implementation
+%    \item Example results
+%\end{itemize}
+
+The ambiguity resolution problem posed in Eq. \eqref{eqn:AR_problem} consists solely in minimizing an $\ell^1$-norm under integer constraints. It is well known, that $\ell^1$-norm minimization problems of type $\min_x \|Ax-b\|_1=\min_x\sum_{k=1}^n|(Ax)_k-b_k|$ in the variable $x\in \R^n$ can be written as the linear program \cite[p. 294]{Boyd2004}
+\begin{align}
+    \min ~~~& c^T\tilde{x} \nonumber \\
+    s.t. ~~~& \tilde{A}_1\tilde{x}\le b ~~~~~~ \tilde{A}_1=[A,-I_n]\nonumber \\
+    & \tilde{A}_2\tilde{x}\ge b         ~~~~~~ \tilde{A}_2=[A,I_n] \\
+    & \text{ with } c=[\underbrace{ 0, ~...,~ 0}_{\nobs} ~~\underbrace{1, ~ ..., ~ 1}_{\nobs}] 
+\end{align}
+in the optimization variable $\tilde{x}=[x_1, ... ,x_{n}, v_1, ... ,v_{n}]^T\in \R^{2n}$. Here $v_1, ... ,v_{n}$ are the absolute values of the residuals $(Ax-b)_k$ whose positivity is guaranteed by the constraints and whose sum is to be minimized as as indicated by $c^T \tilde{x}=\sum_{k=1}^{n}v_k$. $I_n$ is a unit matrix of dimension $n \times n$. The pure ambiguity resolution problem \eqref{eqn:AR_problem} may therefore be rewritten as a mixed integer linear program in the optimization variables $d_1\ge 0, \vec{N}_1\in \N^{\nobs}$ and the residuals $v\in \R^{\nobs}_+$. It has the form
+\begin{align}
+    \min ~~~& c^Tx \nonumber \\
+    s.t. ~~~&  A_1 x \le \hatphi_1 &&A_1=[4\pi \vec{\lambda}^{-1}, -2 \pi I_{\nobs}, -I_{\nobs}]\in \R^{\nobs}\times \R^{2 \nobs +1}  \nonumber \\
+    & A_2 x \ge \hatphi_1 && A_2=[4\pi \vec{\lambda}^{-1}, -2 \pi I_{\nobs}, I_{\nobs}]\in \R^{\nobs}\times \R^{2 \nobs +1}  \nonumber \\
+    & A_3 x \ge 0 && A_3=[1, 0 , ... ,0]\in \R^{1}\times \R^{2 \nobs +1}  \nonumber \\
+    \label{eqn:AR_MILP}
+    & A_4 x \in \N^{\nobs} && A_4=[\vec{0}, I_{\nobs}, 0_{\nobs \times \nobs}]\in \R^{\nobs}\times \R^{2 \nobs +1}  \\
+     & &&  c=[\underbrace{ 0, ~...,~ 0}_{\nobs+1} ~~\underbrace{1, ~ ..., ~ 1}_{\nobs}]^T \in \R^{2\nobs+1}  \nonumber
+\end{align}
+where $x=[d_1, N_{11}, ..., N_{\nobs 1}, v_1, ..., v_{\nobs}]^T\in \R^{2\nobs+1}$ is the vector-valued optimization variable and $c^Tx=\sum_{k=1}^{\nobs}v_k$ is the objective measure of discrepancy to be minimized. $\vec{\lambda}^{-1}$ is the vector $ [\lambda_1^{-1}, ..., \lambda_{\nobs}^{-1}]^T\in \R^{\nobs}$ and $\vec{0}$ and $0_{n\times n}$ are vectors and matrices of the indicated dimensions containing only zeros.
+
+With the proper redefinitions of $c,x$ and $A$, problem \eqref{eqn:AR_MILP} may be reformulated as the optimization problem
+\begin{align}
+    \min ~~~ & c^T x \nonumber \\
+    s.t. ~~~ & A x\le b \nonumber \\
+    & x \ge 0 \nonumber \\
+    \label{eqn:AR_canonical}
+    & x_1, ..., x_{n_c} \in \mathbb{Z}_0
+\end{align}
+
+which is a mixed integer linear program in canonical form. For these types of problems, exact solution methods like the branch-and-cut algorithm have been proposed, implemented, and empirically validated to exhibit reasonable performance although problem \eqref{eqn:AR_canonical} is Np hard in general \cite{Padberg2005}. These solution methods rely on solving a sequence of LP-relaxations to Eq. \eqref{eqn:AR_canonical} that subsequently add equivalents to the initially absent integrality constraints in form of linear inequalities. These aim to either find tightened LP-relaxations with active constraints and likely integer solutions (brand-and-bound) or separate feasible integer solutions from infeasible fractional ones (Gomory cuts) \cite[pp. 396-413]{Vanderbei2007}. The resulting tree of LP relaxations can be explored efficiently by making use of depth-first searches and pruning branches whose optimal value is guaranteed to be outperformed by a previously evaluated branch. One implementation of this algorithm is provided by the openly accessible GNU linear programming kit\footnote{https://www.gnu.org/software/glpk/} whose GLPK\_MI solver as intefaced via the toolbox CVXPY \cite{Diamond2016} is employed for the practical implementations in the remainder of the paper.
+
+Note that the auxiliary integer variables $N_{11}, ..., N_{\nobs 1}$ in Eq. \eqref{eqn:AR_MILP} are a means for formulating the ambiguity resolution as a linear program and make it amenable to numeric solution as the simpler and more intuitive scalar optimization problem
+\begin{align}
+    \min ~~~ & \|\varphi(d) - \phobs\|_1 \nonumber \\
+    \label{eqn:AR_global_hard}
+    s.t. ~~~& d \ge 0
+\end{align}
+in the one-dimensional optimization variable $d\ge 0$ is nonconvex to the point that it can not be tackled with standard gradient-based procedures anymore. With $\varphi(d)$ and $\phobs$ as defined in the run-up to Eq. \eqref{eqn:nonlinear_optimization}, Figure \ref{fig:3.1} illustrates this observation for noiseless simulations of exemplary measurements based on ground truth $d_{\text{true}}=1$ and wavelengths $\{\lambda_l\}_{k=1}^10, \lambda_k=10^{k/5-2}$.
+
+
+\begin{figure}[h]
+	\includegraphics[width=0.9\textwidth]{./Images/Dependence_on_d.jpg}
+	\caption{The objective function $\|\varphi(d) -\phobs\|_1 $ exhibits a multitude of sharp local minima. This routinely makes global optimization algorithms converge to incorrect results. Brute force search reliably recovers the true minimum of $0$ at $d=0$ only after a million evaluations of the objective function and partitioning the interval $[0,2]$ into subintervals with size $10^{-5}$ or less.}
+	\label{fig:3.1} 
+\end{figure}
+
+For $d_{\text{true}}\in [0,10]$ chosen uniformly with $\nobs=5$ the python nonlinear global solver scikit.optimize \cite{Head2020} solves problem \eqref{eqn:AR_global_hard} correctly in  0 \% of the cases in $1036$ trials whereas the equivalent problem \eqref{eqn:AR_MILP} yields correct estimations of $d_{\text{true}}$ in about \% of the cases in $10^3$ trials. Our proposed algorithm together with the code needed to generate explanatory figures as well as analyses of special cases is openly accessible and can be downloaded on GitHub under XXXXXXXXX. \\
+
+\subsection{Performance guarantees and limit behavior}
+%\begin{itemize}
+%    \item L1 norm minimization and implications
+%    \item Comparison to L2 and L infty norm solutions
+%\end{itemize}
+
+Several convergence guarantees of varying strength can be established. Analyzing the performance of the algorithm in limit cases involving infinite amounts of observations requires arguments linking probabilistic quantities like expected values and circular distributions with deterministic properties like equidistribution and ergodicity. Recall that the estimator $\hat{d}$ solving the ambiguity resolution problem is defined in Eq. \eqref{eqn:AR_problem}  as the solution to the optimization problem
+\begin{align}
+\label{eqn:AR_optimization}
+\min ~~~~& \|2\pi (2\Lambda^{-1}\vec{d} -\vec{N})-\phobs\|_1 \\
+s.t. ~~~~~& d\ge 0 ~~~~~~\vec{N}\in \mathbb{N}^n \nonumber \\
+& \vec{d}=[d, ... ,d]\in \R^n_+ \nonumber
+\end{align}
+in the variables $d\in \R_+$ and $\vec{N} \in \mathbb{N}^n$ for $n$ the number of wavelengths $\{\lambda_k\}_{k=1}^n$ used to sample. The $n\times n$ matrix $\Lambda$ is given as $(\Lambda)_{ij}=\delta_{ij}\lambda_i$ with $\delta_{ij}$ the Kronecker delta. Bounding the variable $d_1$ in Eq. \eqref{eqn:AR_optimization} to a finite interval $[d_{\min},d_{\max}]$ reduces the search space and decreases time till convergence.  Assuming some technical conditions on $\vec{N}$ and ${\lambda_k}_{k=1}^n$, we argue the estimator $\hat{d}$ to be related to the true value $\tilde{d}$ according to the following propositions claiming robustness w.r.t the presence of noise and mixing.
+\begin{itemize}
+\item[i)] In the presence of noise, the expected value of $\hat{d}$ is $\widetilde{d}$.
+\item[ii)] In the presence of noise, $\hat{d}$ converges to $\widetilde{d}$ with increasing number of observations.
+\item[iii)] In the presence of two scatterers in distances $\widetilde{d_1}$ and $\widetilde{d_2}$, $\hat{d}$ converges to the distance $\widetilde{d_1}$ of the dominant scatterer with increasing number of observations.
+\end{itemize}
+Note that even though statement i) and ii) appear similar, they draw conclusions about different kinds of limits. Whereas statement i) claims that $\hat{d}$ is correct on average, ii) and iii) claim that $\hat{d}$ improves with increasing number of wavelengths used for sampling. The above statements can be made formal in the following three theorems, whose implications are briefly summarized and whose proofs can be found in the appendix.
+
+
+\begin{thm}[Statement i)] \label{thm:i)} Suppose that $\vec{N}$ has been correctly determined and $\epsilon=[\epsilon_1, ... ,\epsilon_n]^T$ is a vector of finite variance, symmetric, and mean-zero i.i.d. random variables $\{\epsilon_k\}_{k=1}^n$. Let $\phobs=\widetilde{\varphi}\modplus \epsilon$ be the superposition of the noiseless phase $\widetilde{\varphi}$ and the noise-variable. Then $\operatorname{argmin}_{d\ge 0} E_{p_{\epsilon}}\left[\|4\pi \Lambda^{-1}(\vec{d} - \vec{N})-\phobs\|_1\right] = \widetilde{d} $, the true underlying distance.
+\end{thm}
+
+Theorem \ref{thm:i)} essentially remarks the unbiasedness of our solution procedure w.r.t. the presence of noise and assures that the estimator is not too far off the true value on average. This also provides the basis for establishing Theorem \ref{thm:ii)} as for an increasing amount of observation wavelengths $\lambda_k, k=1, ... ,n$ the average absolute residuals converge to their expected values. It may be interesting to note that no analogue to theorem \ref{thm:i)} could be constructed when multiple backscatterers are involved. In this case, even the expected value of $\hat{d}$ could not be established to be one of the distances to the backstattering surfaces and a nonzero bias is suggested by the empirical investigations carried out in subsection \ref{subsub:DTE}. Statement iii) and the associated theorem \ref{thm:iii)} are essentially a mixed pixed analogue of the infinite observation limit case treated in statement ii) rather than an extension to theorem \ref{thm:i)}.
+
+
+
+
+
+\begin{thm}[Statement ii)] \label{thm:ii)} Suppose that $\vec{N}$ has been correctly determined and $\epsilon=[\epsilon_1, ... ,\epsilon_n]^T$ is a vector of finite variance, symmetric, and mean-zero i.i.d. random variables $\{\epsilon_k\}_{k=1}^n$ whose absolute value is bounded by some positive constant $c$. Let $\phobs=\widetilde{\varphi}\modplus \epsilon$ be the superposition of the noiseless phase $\widetilde{\varphi}$ and the noise-variable and $n$ be the number of observations. Then  $\lim_{n\rightarrow \infty} \frac{1}{n}\|4\pi \Lambda^{-1}(\vec{d} - \vec{N})-\phobs\|_1 = \lim_{n\rightarrow \infty} \frac{1}{n}\sum_{k=1}^nE_{\pe}|4 \pi \lambda_k^{-1} (d-\widetilde{d}) + \epsilon_k| $ whose minimum is achieved for $d=\widetilde{d}$, the underlying true distance.
+\end{thm}
+
+
+
+
+Strictly speaking, statement ii) does not hold for Gaussian noise since it is not bounded. However, the statement holds for noise following Gaussian distribution truncated at e.g. $|\epsilon|\ge 6 \sigma_{\epsilon}$ \textemdash for all practical intents and purposes it may therefore be assumed to hold. Hoeffdings inequality \cite[thm. 2]{Hoeffding1963} bounds the probability of means of random variables deviating from their expected value and can be employed to generate a first rule for choosing observation wavelengths $\lambda_1, ..., \lambda_n$ robust against noise. By analyzing the residuals of the optimization in metric space instead of phase space, one arrives at the term $\bar{M_n}$ quantifying the $\ell^1$-norm of the residuals as a function of the number $n$ of observations.
+\begin{align}
+\bar{M_n}:=& \frac{1}{n}\|(4\pi)^{-1} \Lambda(4 \pi \Lambda^{-1} \vec{\Delta d} + \epsilon)\|_1=\frac{1}{n}\|\vec{\Delta d} +(4\pi)^{-1}\Lambda \epsilon\|_1=\frac{1}{n}\sum_{k=1}^n |\Delta d +(4 \pi)^{-1} \lambda_k \epsilon_k|
+\end{align}
+with $\Delta d =(d-\widetilde{d})$ and $\vec{\Delta d}_k =\Delta d$ for $k=1, ..., n$. The series $\bar{M_n}$ converges for $\{\lambda_k\}_{k=1}^{\infty}$ bounded by a finite $\lambda_{\max}$ and satisfies $\lim_{n\rightarrow \infty} \bar{M_n} = E_{\pe}\left[ \lim_{n\rightarrow \infty} \bar{M_n} \right]$ and $\operatorname{argmin}_{\Delta d} E_{\pe}\left[ \lim_{n\rightarrow \infty} \bar{M_n}\right]=0$ due to the sequence of arguments laid out in appendix \ref{app:pf_thmii)}. Demanding the sequence $\{\lambda_k\}_{k=1}^{\infty} $ to contribute to a fast convergence of $\bar{M_n}$ to $E_{\pe}[\bar{M_n}]$ can be done by enforcing the wavelengths to decrease the Hoeffding upper bound for the discrepancy;
+$$P(|\bar{M_n} -E_{\pe}[\bar{M_n}]|\ge \epsilon)\le 2 \exp \left(\frac{-2n^2\epsilon^2}{\sum_{k=1}^n(b_k^u-b_k^l)^2}\right).$$
+But the right hand side with upper bound $b_k^u$ and lower bounds $b_k^l=0$ for the respective terms $|\Delta d +(4 \pi)^{-1}\lambda_k\epsilon_k|$ can be bounded in turn by noting that $b_k^u=|\Delta d|+(4 \pi)^{-1} \lambda_kc\le |\Delta d|+(4\pi)^{-1} \lambda_{\max}c$ implying
+$$ P(|\bar{M_n} -E_{\pe}[\bar{M_n}]|\ge \epsilon)\le 2 \exp\left(\frac{-2 n \epsilon^2}{[|\Delta d| + (4 \pi)^{-1}\lambda_{\max}c]^2}\right).$$
+This probability is lowest for $\lambda_{\max}$ of the minimal possible value not leading to an incorrectly inferred $\vec{N}$.
+
+
+\begin{thm}[Statement iii)] \label{thm:iii)}Suppose that $\vec{N}$ has been correctly determined and that the $k-$th element $\phobs_k$ of the $n-$dimensional vector $\phobs=[\phobs_1, ..., \phobs_n]^T$ is the argument of a complex number $\bar{z_k} = w_1z^1_k+w_2z^2_k$ gained via superposition of two unit-norm complex numbers 
+\begin{align}
+z_k^1=\exp\left(4\pi i \lambda_k^{-1} d_1\right) ~~~~~~& ~~~~~z_k^2=\exp\left( 4\pi i \lambda_k^{-1} d_2\right)
+\end{align}
+associated to different magnitudes $w_1>w_2$ and distances $d_1$ and $d_2$. Suppose furthermore that the wavelengths $\lambda_k$ are chosen according to the rule $\mathbb{Q}\ni\lambda_k=(c_0+k\Delta)^{-1}$, $\Delta >0$ and that $\hat{d} $ can be bounded to the open interval $(d_1-\frac{1}{2\Delta},d_1+\frac{1}{2\Delta})$. Then for $n$ going to infinity, the estimate $\hat{d}$ converges to $d_1$ if $w_1 > 1.6 w_2$.
+\end{thm}
+
+We briefly sketch the interesting parts of the proof shedding some light on the limiting behavior of the observations. When the number of observations goes to infinity, the average absolute residuals go toward $\pi / 2$, i.e. $$\lim_{n \rightarrow \infty} n^{-1} \sum_{k=1}^n |\Delta \varphi_k|=E_{\Delta \varphi \sim \mathcal{U}} |\Delta \varphi|$$ for most choices of $d$. This is due to the sequence $\{\Delta \varphi_k\}_{k=1}^{\infty}=\{\hat{\varphi}(d)-\phobs\}_{k=1}^{\infty}$ being uniformly distributed on the circle if the quotient $(d-d_1)/(d-d_2)$ is irrational. If however $(d-d_1)=:\Delta d_1$ and $(d-d_2)=:\Delta d_2$ have a finite smallest common multiple and the equation 
+\begin{align}
+\label{eqn:rational_dependence}
+m_1\Delta d_1 + m_2 \Delta d_2 & = 0
+\end{align}
+has an integer solution $(m_1,m_2)\in \mathbb{Z}^2\backslash \{0\}$, then the observations might be clustered or describing complicated, spirograph-like figures owing to the fact that the observed phase residuals $\Delta \varphi_k$ are the phases of sums of complex-valued roots of unity, $\Delta \varphi_k=\varphi(z_k)$. Figure \ref{fig:3.2} illustrates the limiting behavior of the observed complex-valued residuals 
+\begin{align}
+z_k=w_1 e^{4 \pi i \lambda_k^{-1} \Delta d_1} + w_2 e^{4 \pi i \lambda_k^{-1} \Delta d_2}
+\end{align}
+whose absolute phases $|\varphi(z_k)|=|\hatphi_k(d)-\phobs_k|$ are demanded to be small in optimization approach \eqref{eqn:AR_problem} .
+
+
+\begin{figure}[h]
+	\includegraphics[width=0.9\textwidth]{./Images/Residual_distribution4.jpg}
+	\caption{The top two rows of panels show the complex residuals left after predicting complex observations with candidate choices of $d$ satisfying certain multiplicativity conditions. These result in observations that are either almost random in their behavior (irrational quotients), highly structured but with almost uniform phase (rational, nonzero quotients), or tightly clustered around phase value $0$ leading to small residuals ($d$ equal to one of the true distances). The lower panel gives and overview of the norm of the phase residuals in these different situations.}
+	\label{fig:3.2} 
+\end{figure}
+
+The figure suggests the empirical conclusion that $\Delta d_1=0$ (corresponding to $m_2=0$ in Eq. \eqref{eqn:rational_dependence}) and $\Delta d_2=0$ (corresponding to $m_1=0$ in Eq. \eqref{eqn:rational_dependence} constitute limit cases with $\Delta d_1=0$ minimizing the average absolute phase residuals. The bigger the integers $m_1,m_2$ involved in Eq. \eqref{eqn:rational_dependence}, the more circles appear in the plots of the complex residuals and the closer $n^{-1} \|\hatphi(d)-\phobs\|$ comes to $\pi /2$ due to $\hatphi_k(d)$ approaching uniform distribution on the circle. Comparing a lower bound on $n^{-1}\|\hatphi_k(d)-\phobs\|$ for $d\neq d_1$ with an upper bound for $d=d_1$ as given by Eq. \eqref{eqn:psi_bound} as $|\Delta \psi| = \pi/2-\arccos(w_2/w_1)$ lets one conclude that for $w_2 < \cos((5/18)\pi) w_1$, the algorithm is guaranteed to provide the estimate $\hat{d}=d_1$ in the limit of infinite observations. In practice, the algorithm performs well as soon as $w_1 > w_2$ by a slight margin indicating that the bounds listed in theorem \ref{thm:iii)} are too conservative and could be improved upon. If by chance there exists a $d$ with $\lambda_k^{-1} \Delta d_1 \in \mathbb{Z}$ or $\lambda_k^{-1} \Delta d_2 \in \mathbb{Z}$ for all $k$ \textemdash which occurs e.g. for $|d_1 -d_2|/2$ being a multiple of $\lambda_k$ for all $k$ \textemdash a wrong solution might be obtained.  
+
+A similar investigation reveals further fail-cases when certain rationality conditions on the involved distances and wavelengths are met. Supposing a regular spacing of the inverse wavelengths as $ \lambda_k^{-1} = c_0 + k\Delta$ and one scattering surface $S$ in distance $d$, one finds that the observed phase 
+\begin{align}
+\phobs_k=\varphi(z_k^{\text{obs}}) ~~~~&~~~~ \zobs_k=e^{4 \pi i \lambda_k^{-1}d }
+\end{align}
+
+is uninformative if $2 d\Delta \in \mathbb{Z}$ as then for all $k$ it holds that $\phobs_k=\varphi(e^{2 \pi i c_0d})$ independent of $k$ with all measurements past the first one revealing only that $d$ is a multiple of $(2\Delta)^{-1}$. In general, if $2 d \Delta$ is rational with fully reduced fractional representation $2d\Delta =m_1/m_2$ and $m_1,m_2$ integers, then the sequence $\{\phobs_k\}_{k=1}^{\infty}$ is $m_2$-periodic with all observations past the first one revealing only that $d$ is a multiple of $(2m_2 \Delta)^{-1}$ but not of the bigger value $(2 m \Delta)^{-1}$ for $\Z_+\ni m <m_2$. For $m_2$ large, the resulting sequence likely is enough to determine $d$ uniquely; however rational dependencies between $d$ and $\Delta$ might lead to small $m_2$ and possibly unresolvable ambiguities in the observations. When two surfaces $S_1$ and $S_2$ in distances $d_1$ and $d_2$ to the instrument are involved, accidental simple relationships between $(d_1,\Delta)$ and $(d_2,\Delta)$ are even less likely but might altogether be avoided by choosing $\lambda_k$ randomly or according to a pseudorandom low discrepancy sequence that ensures a uniform distribution of the observed phases in the limit of infinite observations.
+
+Combining these deliberations with the discussion surrounding theorem \ref{thm:ii)} and the need to bound $d$ from above and below by $2\Delta$ as demanded by theorem \ref{thm:iii)} leads one to the conclusion that a set of wavelengths will perform well in conjunction with the estimation procedure described by Eq.\ref{eqn:AR_optimization} if it is clustered tightly and each of its elements are small and randomly chosen.
+
+
+
+\section{Performance metrics and practical results}   \label{Sec_Results}
+
+We use a Matlab implementation of the mixed integer linear program described in Section \ref{Sec:MILP} solving the ambiguity resolution problem defined in equation \eqref{eqn:AR_problem} to evaluate its performance affected by noise and mixed pixels via numerical simulations. The impact of noise in the individual phase observations on the capacity of the proposed algorithm to resolve cycle ambiguities correctly, along with the degradation of precision on the estimated absolute distance as a function of noise power, are first analyzed on a measurement scenario composed of a single scatterer ($\nmix=1$). The performance of the proposed solution is then evaluated on more complex settings involving multiple scatterers ($\nmix\gg 1$), both closely separated (reproducing the sub-mm distance variations introduced by surface geometry within the laser footprint) and including significantly distinct distances (representing a so-called mixed pixel scenario where the measurement beam illuminates two or more surfaces at grossly different positions).
+
+\subsection{Ambiguity resolution errors and precision}  \label{Sec_Results_Precision}
+
+The cycle ambiguity errors and the precision of the absolute distances estimated by our proposed algorithm are assessed via Monte Carlo (MC) simulation as a function of the SNR of the sinusoidal signals whose phases are observed, and the number $n_\mathrm{obs}$ and value $\left\{\lambda_k\right\}^{n_\mathrm{obs}}_{k=1}$ of the applied modulation wavelengths. The selected simulation sample size per SNR value is $M_{\rm MC}=500$. For each wavelength configuration, the set of corresponding phase observations $\left\{\varphi_k\right\}^{n_\mathrm{obs}}_{k=1}$ are generated as
+\begin{align}
+    \varphi_k=\frac{4\pi}{\lambda_k}\widetilde{d}\modplus\varepsilon_k
+    \label{eqn_phaseObsSim}
+\end{align}
+for $k = 1, ...,\nobs$, where $\widetilde{d}$ is the true value of the absolute distance to a single scatterer, and $\{ \epsilon_k\}_{k=1}^{\nobs}$ is a sequence of i.i.d. white noise Gaussian variables. $\widetilde{d}$ is fixed to 25~m across simulations (with lower and upper bounds of the solver set to 0~m and 50~m respectively), while the phase noise power is adjusted for each evaluated SNR value. The estimated distance $\hat{d}_1$ is then computed for each simulation run from the corresponding sets of $n_\mathrm{obs}$ wavelengths and noisy phase observations.
+
+The evaluated SNR of the received sinusoidal signals ranges from approximately -10~dB to 50~dB, covering and extending beyond realistic values for current phase-based EDM systems. To ease interpretation of the signal quality of the observed phases by providing a meaningful reference in distance units, all subsequent results are represented against the equivalent range noise $\sigma_\mathrm{ref}$ that would correspond to a distance measurement derived from the shortest of the evaluated modulation wavelengths in each case instead of against the associated SNR. This equivalent range noise is computed as $\sigma_\mathrm{ref}=\sigma_{\varphi} \min\left(\lambda_k\right)/\left(4\pi\right)$, where $\min(\lambda_k):=\min_{k\in \{1, ..., \nobs\}}(\lambda_k)$ and $\sigma_\varphi=1/\sqrt{\mathrm{SNR}}$ is a sufficiently accurate approximation [REF] of the expected standard deviation for narrow-band phase measurements as a function of the signal SNR. $\sigma_\mathrm{ref}$ can be interpreted as the expected precision that would be obtained if the distance estimation were carried out with only the fastest modulation yielding the best resolution, provided that its cycle ambiguity were solved by external means, and thus serves as a reference for the capacity of the proposed algorithm to make efficient use of the available phase observations.
+
+Figure \ref{fig_exampleEstimatedDistance} shows an example of the simulation outputs for a set of 5 randomly distributed wavelengths in $\interval{0.3}{3}$~m as a function of the equivalent range noise corresponding to the input SNR. Figure \ref{fig_exampleEstimatedDistance}.a depicts the estimated distances including the complete range of possible solutions, where incorrect ambiguity resolutions triggered by noise levels higher than 4~mm are visible. Figure \ref{fig_exampleEstimatedDistance}.b shows a detail of the former around $\widetilde{d}$, thus making the increase of dispersion with increasing noise power visible.
+
+\begin{figure}[h]
+    \begin{center}
+        \subfloat[]{\includegraphics[width=.45\textwidth]{Images/estimatedDistance_VS_SNR.png}}
+        \hspace{0.01 mm}
+        \subfloat[]{\includegraphics[width=.45\textwidth]{Images/estimatedDistance_VS_SNR_detail.png}}
+    \end{center}
+    \caption{Example of the absolute distances estimated by the proposed ambiguity resolution algorithm as a function of signal SNR (represented by the equivalent range noise $\sigma_\mathrm{ref}$ at the shortest modulation wavelength $\min\left(\lambda_k\right)$) for 5 randomly distributed modulation wavelengths in $\interval{0.3}{3}$~m. (a) Full measurement range and (b) detail around $\widetilde{d}=25$~m.}
+    \label{fig_exampleEstimatedDistance} 
+\end{figure}
+
+The equivalent range noise level $\erTH$ triggering incorrect solutions along with the average $\overline{\varepsilon_d}$ and standard deviation $\sigma_{\varepsilon_d}$ of the absolute estimated distance error $\varepsilon_d=\left|\hat{d}_1-\widetilde{d}\right|$ across the $M_{\rm MC}$ simulation runs per SNR value are used as metrics for the performance evaluation from here on.
+
+These metrics are applied next to analyze the impact of the value and number of the implemented modulation wavelengths on the performance of the proposed algorithm. While the optimization of the set of applied wavelengths under certain measurement conditions is out of the scope of this paper, the subsequent experimental analysis aims at providing practical insights on its impact and establishing a framework for the performance evaluation herein under meaningful comparable conditions.
+
+
+\subsubsection{Impact of wavelength configuration}  \label{Sec_Results_Precision_WLconfig}
+
+The selected modulation wavelengths are expected to influence the minimum noise level $\erTH$ producing ambiguity resolution errors and the precision of the estimated distance when correctly resolved.
+
+We have analyzed $\erTH$ for 100 different sets of 3 wavelengths fixing the shortest one to 0.3~m while the remaining two were randomly selected for each set following a uniform distribution in $\left[0.3,\infty\right)$~m. The minimum fixed wavelength of 0.3~m, corresponding to a modulation frequency of approximately 1~GHz, represents coarsely the current limit in high-end phase-based EDM instruments as defined by the maximum bandwidth of practically available modulators. Figure \ref{fig_error_VS_WLconfig}.a shows the obtained $\erTH$ in the horizontal axis, while the vertical axes represent both the value of the longest wavelength on each set (circles, right axis) and the minimum spacing $\Delta^{\mathrm{min}}_\lambda$ between all possible multiples of the wavelengths within each set (triangles, left axis). $\Delta^{\mathrm{min}}_\lambda$ is calculated as
+\begin{align}
+    \Delta^{\mathrm{min}}_{\lambda} =\min {_{\substack{(m_1,m_2)\in \{1, ..., n_{rng}\}^2,\\(k_1,k_2)\in \{1, ... ,\nobs\}^2\\k_1\neq k_2}}}\left| m_1\lambda_{k_1} -  m_2\lambda_{k_2} \right|
+    \label{eqn_WL_spacing}
+\end{align}
+with
+\begin{align}
+    n_\mathrm{rng}=\max{_{k\in \{1, ... ,\nobs\}}}{\left( \lfloor d_\mathrm{max}/  \lambda_{k} \rfloor \right)},
+    \label{eqn_nRNG}
+\end{align}
+where $d_\mathrm{max}$ is the maximum measurement range, set to 50~m across the evaluation. As visible in Figure~\ref{fig_error_VS_WLconfig}.a, $\erTH$ does not show any clear correlation with the minimum wavelength spacing $\Delta^{\mathrm{min}}_\lambda$ or the longest wavelength of each set.
+
+\begin{figure}[!h]
+    \begin{center}
+        \subfloat[]{\includegraphics[width=.45\textwidth]{Images/errorLevel_VS_WLconfig.eps}}
+        \hspace{0.01 mm}
+        \subfloat[]{\includegraphics[width=.45\textwidth]{Images/STD_VS_SNR_VS_BW.eps}}
+    \end{center}
+    \caption{(a) Minimum wavelength spacing $\Delta^{\mathrm{min}}_\lambda$ and maximum wavelength $\max{\left(\lambda_k\right)}$ and corresponding equivalent range noise levels $\erTH$ triggering incorrect solutions, computed for random sets of 3 modulation wavelengths ($\min{\left(\lambda_k\right)}$ fixed at 0.3~m). (b) Standard deviation $\sigma_{\varepsilon_d}$ of estimated distance error as a function of signal SNR (represented by the equivalent range noise $\sigma_\mathrm{ref}$ at 0.3~m) for different shortest modulation wavelengths $\min{\left(\lambda_k\right)}$.}
+    \label{fig_error_VS_WLconfig} 
+\end{figure}
+
+The impact of the shortest modulation wavelength was also investigated by analyzing the results on various sets of 3 wavelengths modifying only the shortest one $\min{\left(\lambda_k\right)}$. Figure~\ref{fig_error_VS_WLconfig}.b shows the standard deviation $\sigma_{\varepsilon_d}$ of the measured distance error as a function of input equivalent range noise $\sigma_\mathrm{ref}$ corresponding to $\lambda_k$ = 0.3~m for four different $\min{\left(\lambda_k\right)}$ between 0.3~m and 6~m. The results show the expected trade-off between robustness and precision regulated by the modulation bandwidth, typical from phase-based EDM systems. On the one hand, the noise level triggering wrong solutions (visible by the sudden increase in standard deviation) is larger for longer modulation wavelengths, thus favouring using longer wavelengths that reduce ambiguity problems. On the other hand, precision is proportional to the modulation wavelength within the range of input noise that allows correct estimations, which motivates using shorter wavelengths introducing smaller scaling of the phase uncertainties into distance.
+
+For the rest of the performance analysis, a heuristic selection of one of the sets of 3 modulation wavelengths that provide the largest $\erTH$ according to the results in Figure~\ref{fig_error_VS_WLconfig}.a is applied as standard wavelength configuration, namely 0.3~m, 0.31~m and 0.889~m.
+
+
+\subsubsection{Impact of number of wavelengths} \label{Sec_Results_Precision_nWL}
+
+The prospective benefits of increasing the number of observations by using more modulation wavelengths have been analyzed by extending the standard set with additional randomly distributed wavelengths in $\left(0.3,0.889\right)$~m. Figures~\ref{fig_STD_VS_nWLs}.a and \ref{fig_STD_VS_nWLs}.b show respectively the average $\overline{\varepsilon_d}$ and standard deviation $\sigma_{\varepsilon_d}$ of the absolute estimated distance error varying the number of observations.
+
+\begin{figure}[!h]
+    \begin{center}
+        \subfloat[]{\includegraphics[width=.45\textwidth]{Images/Mean_VS_SNR_VS_nWLs.eps}}
+        \hspace{0.01 mm}
+        \subfloat[]{\includegraphics[width=.45\textwidth]{Images/STD_VS_SNR_VS_nWLs.eps}}
+        \end{center}
+        \caption{Average $\overline{\varepsilon_d}$ (a) and standard deviation $\sigma_{\varepsilon_d}$ (b) of estimated distance error as a function of signal SNR (represented by the equivalent range noise $\sigma_\mathrm{ref}$ at 0.3~m) for different number of modulation wavelengths.}
+    \label{fig_STD_VS_nWLs} 
+\end{figure}
+
+The joint analysis of both figures indicates a clear improvement on robustness with the number of applied wavelengths. An increase of approximately one order of magnitude is observed on the noise level required to trigger resolution errors when using 20 different wavelengths ($\erTH$ $\approx$ 35~mm) compared to the one obtained for only 3 wavelengths ($\erTH$ $\approx$ 3.5~mm). It should be also noted that, when only 2 wavelengths are used, the algorithm is unable to resolve the ambiguity within the range of evaluated noise levels. A slight improvement on precision is also visible for increasing number of wavelengths, with 20 observations providing standard deviations about 50\% smaller than when only 3 are used.
+
+
+\subsection{Performance on mixed pixel settings}
+
+The performance of the proposed algorithm on mixed-pixel conditions has been evaluated by extending the simulated scenario to include signal mixing from scatterers at different distances. The evaluated scenario represents a basic mixed-pixel situation in which the laser footprint illuminates simultaneously two surfaces $S_1$ and $S_2$ at significantly different distances. Each surface is represented by its respective average distances $d_1$ and $d_2=d_1 + \Delta_d$ to the measurement origin. 100 scatterers are defined for each surface, spread around the corresponding average distance with randomly distributed increments $\delta_n$ and $\delta_m$ with a standard deviation of 100 $\mathrm{\mu m}$. These scatterers model the signal mixing due to sub-footprint geometry variations on each surface. Relative weights $w_1$ and $w_2$ are also defined for each surface and applied to all its associated scatterers, representing the relative power backreflected on each surface, which on a real measurement would mainly depend on its reflectance, distance and relative orientation with respect to the instrument. For each modulation wavelength, the corresponding phase observations are then generated for each scatterer. The complete measurement is thus composed of $\nmix = 200$ components per wavelength. Finally, a total phase observation $\phobs_k$ is computed per wavelength $\lambda_k$ from the weighted individual components as 
+\begin{align}
+    \phobs_k=\atan{\left( \frac{ w_1\sum_{n=1}^{\nmix/2}\sin{\left[\frac{4\pi}{\lambda_k}\left(d_1+\delta_n\right)\right]} + w_2\sum_{m=1}^{\nmix/2}\sin{\left[\frac{4\pi}{\lambda_k}\left(d_2+\delta_m\right)\right]} }{ w_1\sum_{n=1}^{\nmix/2}\cos{\left[\frac{4\pi}{\lambda_k}\left(d_1+\delta_n\right)\right]} + w_2\sum_{m=1}^{\nmix/2}\cos{\left[\frac{4\pi}{\lambda_k}\left(d_2+\delta_m\right)\right]} } \right)} \modplus \varepsilon_k
+    \label{eqn_phaseObsSimMP}
+\end{align}
+for $k = 1, ...,\nobs$. AWG phase noise $\varepsilon_k$ is added as defined for the precision analysis in Section \ref{Sec_Results_Precision}, producing the actual observations that are input to the ambiguity resolution algorithm.
+
+Figure~\ref{fig_MP_VS_nWLs} shows the color-mapped estimated distance resulting from evaluating this measurement scenario for different number of wavelengths when varying the target separation $\Delta_d$ between -1.5~m and 1.5~m and the ratio $w_2/w_1$ between target weights between $10^{-2}$ and $10^2$. The target separation is modified by maintaining $S_1$ static at $d_1$ = 25~m while varying the average distance $d_2$ of $S_2$ between 23.5~m and 26.5~m. The evaluated wavelength configurations are the same as those applied in Section~\ref{Sec_Results_Precision_nWL}, and the simulated input noised is scaled to $\sigma_\mathrm{ref}$ = 1~mm to guarantee that no ambiguity resolution errors are triggered by noise for any wavelength configuration with $\nobs\geq 3$ in accordance to the results in such section.
+
+\begin{figure}[!h]
+    \begin{center}
+        \subfloat[3 wavelengths]{\includegraphics[width=.45\textwidth]{Images/MP_3WL.png}}
+        \hspace{0.01 mm}
+        \subfloat[5 wavelengths]{\includegraphics[width=.45\textwidth]{Images/MP_5WL.png}}
+        \\
+        \subfloat[10 wavelengths]{\includegraphics[width=.45\textwidth]{Images/MP_10WL.png}}
+        \hspace{0.01 mm}
+        \subfloat[20 wavelengths]{\includegraphics[width=.45\textwidth]{Images/MP_20WL.png}}
+    \end{center}
+    \caption{Estimated distance $\hat{d}_1$ as a function of mixed-pixel scenario parameters (target separation $\Delta_d$ and target weights ratio $w_2/w_1$) for different number of observations with equivalent range noise $\sigma_\mathrm{ref}$ = 1~mm).}
+    \label{fig_MP_VS_nWLs} 
+\end{figure}
+
+The results exhibit two clearly different behaviors depending on the target separation and weights. For certain values of $\Delta_d$ and weight ratios $w_2/w_1$ approaching 1, the algorithm is unable to resolve the correct average distance to any of the targets, yielding wrong estimations across the complete evaluated range (see black and white values in Figure~\ref{fig_MP_VS_nWLs}, scale bounded between 23~m and 27~m for clearer visualization). As visible in Figures~\ref{fig_MP_VS_nWLs}.c and \ref{fig_MP_VS_nWLs}.d, the occurrence of these incorrect estimations, however, is largely mitigated by increasing the number of observations.
+
+On the other hand, for other combinations of $\Delta_d$ and $w_2/w_1$ and generally when either one of the targets is significantly dominant ($w_2\ll w_1$ or $w_2\gg w_1$) or a sufficiently high number of observations is used, the algorithm estimates successfully the distance to the most dominant target. This is, aside from the wrong estimation regions, a close approximation to $d_1$ if $w_1>w_2$ or to $d_2$ if $w_2>w_1$ is achieved for individual measurements, thus practically providing mixed-pixel-free estimations without any prior information on the scenario. The accuracy of these estimations and the prospective in-line identification of the non-resolved cases are specifically addressed next.
+
+
+\subsubsection{Dominant target estimation}
+\label{subsub:DTE}
+
+The accuracy of the estimated distance corresponding to the dominant target has been assessed directly from the results in Figure~\ref{fig_MP_VS_nWLs} by focusing only on the static target $S_1$. Figure~\ref{fig_MP_VS_nWLs_detail} shows the error $\hat{d}_1-d_1$ of the estimated distance for 3 and 20 wavelengths and the range of weight values when $S_1$ is dominant ($w_1>w_2$), where non-resolved cases are marked in white.
+
+\begin{figure}[!h]
+    \begin{center}
+        \subfloat[3 wavelengths]{\includegraphics[width=.45\textwidth]{Images/MP_3WL_detail.png}}
+        \hspace{0.01 mm}
+        \subfloat[20 wavelengths]{\includegraphics[width=.45\textwidth]{Images/MP_20WL_detail.png}}
+    \end{center}
+    \caption{Estimated distance error $\varepsilon_d$ as a function of mixed-pixel scenario parameters (target separation $\Delta_d$ and target weights ratio $w_2/w_1$) for different number of observations with equivalent range noise $\sigma_\mathrm{ref}$ = 1~mm).}
+    \label{fig_MP_VS_nWLs_detail} 
+\end{figure}
+
+The results show systematics up to approximately $\pm5$~cm displaying certain periodicity with the target separation depending on the wavelength configuration. The error magnitude decreases as the corresponding target becomes more dominant, not exceeding e.g. 1~cm when $w_1>10w_2$ or 1~mm when $w_1>50w_2$. These results show that, although the performance of the proposed algorithm is slightly degraded w.r.t. non-mixed-pixel settings, it is nevertheless capable of resolving the dominant target in mixed-pixel scenarios with practically useful accuracy.
+
+%Comments on precision: similar to previous results on single target, not shown.
+
+\begin{comment}
+\subsubsection{Extension to multiple targets}
+\begin{itemize}
+    \item Intro MP scenario: more than 2 dominant targets, actual multi-target measurement
+    \item Details simulated scenario: 3 targets, many distances per target with XXX variability, varying weights s.t. each becomes dominant.
+    \item Fig. \ref{fig_Multi_MP_VS_Weights}
+    
+\begin{figure}[!h]
+    \begin{center}
+        \subfloat[3 wavelengths]{\includegraphics[width=.45\textwidth]{Images/Multi_MP_VS_Weights.eps}}
+        \hspace{0.01 mm}
+        \subfloat[20 wavelengths]{\includegraphics[width=.45\textwidth]{Images/Multi_MP_VS_Weights_detail.eps}}
+    \end{center}
+    \caption{Estimated distance as a function of target weights ratio for multiple target scenario (1 mm equivalent range noise STD, XXX wavelength configuration)}
+    \label{fig_Multi_MP_VS_Weights} 
+\end{figure}
+
+    \item Discussion of results: Dominant target still correctly estimated. Error equivalent to 2 target case (Fig. \ref{fig_MP_VS_nWLs_detail}): depends on nWLs and WLconfig VS distances. 
+\end{itemize}
+\end{comment}
+
+
+\subsubsection{Detection of non-resolved mixed-pixels}
+
+Reliable detection of incorrect estimations in mixed-pixel scenarios is highly relevant for the practical robustness of the algorithm. The phase residuals of the estimation process have been analyzed with this aim along with the results in Figure~\ref{fig_MP_VS_nWLs}. Figure~\ref{fig_MP_AR_residuals} shows the r.m.s. value of all the phase residuals yielded by our proposed algorithm as a function of the target separation $\Delta_d$ and the target weights ratio $w_2/w_1$ for the estimations using 3 and 20 wavelengths, respectively.
+
+\begin{figure}[h]
+    \begin{center}
+        \subfloat[3 wavelengths]{\includegraphics[width=.45\textwidth]{Images/MP_3WL_residuals.png}}
+        \hspace{0.01 mm}
+        \subfloat[20 wavelengths]{\includegraphics[width=.45\textwidth]{Images/MP_20WL_residuals.png}}
+    \end{center}
+    \caption{Phase residuals r.m.s. as a function of mixed-pixel scenario parameters (target separation $\Delta_d$ and target weights ratio $w_2/w_1$) corresponding to estimated distances for 3 (\ref{fig_MP_VS_nWLs}.a) and 20 (\ref{fig_MP_VS_nWLs}.d) wavelengths with equivalent range noise $\sigma_\mathrm{ref}$ = 1~mm. XXX-Fix labels if we keep it-XXX}
+    \label{fig_MP_AR_residuals} 
+\end{figure}
+
+As visible in the figure, although the joint r.m.s. value is largely correlated with the non-resolved cases and could be used to identify many of them, it is not a robust indicator for wrong solutions alone. Targeting reliable error detection, we have trained various classifiers (search-tree, kNN and cubic SVM) to use the individual phase residuals---instead of their joint r.m.s. value---from the 3-wavelength case for binary classification of the estimation errors in Figure~\ref{fig_MP_VS_nWLs}.a. The classifiers were then evaluated on similar estimations computed for a different distance true-value $d_1$ for $S_1$, yielding a classification accuracy higher than 95\% in all cases. These results indicate the potential of using individual phase residual analysis to detect non-resolved mixed-pixel cases, improving significantly the practical applicability of the proposed algorithm by enabling error flagging or automatically repeating faulty measurements with a different wavelength configuration if allowed by the instrument.
+
+
+
+\section{Conclusions and outlook}
+%\begin{itemize}
+%    \item Summary of approach and results
+%    \item Contribution
+%    \item What we solved and what still poses a problem
+%    \item Realistic extensions
+%    \item How we plan to get a clearer picture in the future
+%\end{itemize}
+
+We have analyzed the ambiguity resolution problem in phase-based EDM affected by mixed signals due to multiple scatterers. Based on a set of complex-valued observation equations linking EDM measurements and the underlying geometry, we formulate a stochastically motivated optimization problem whose solutions are optimal estimators for the distance between measuring instruments and backscattering surfaces. Starting with a computationally intractable nonlinear optimization problem whose minimizers solve the mixed-pixel unmixing problem by providing a set of distances that most accurately explain the observed phase measurements, we narrow our approach to only cover the ambiguity resolution problem thereby yielding a formulation solvable with mixed integer linear programming. Given an adequate set of modulation wavelengths, this algorithm successfully resolves the distance ambiguity while providing identification of mixed measurements. Furthermore, in the limit of infinite observations, the algorithm's output provably converges to a distance estimate equalling either the true distance (where one exists) or the distance to the most dominant scatterer, opening up possibilities for solving the unabridged unmixing problem. The evaluation of the proposed algorithm via numerical simulation provides insights on the impact of the number and value of the selected modulation wavelengths on the ambiguity resolution capability and distance measurement performance under realistic noise levels. The results demonstrate precision comparable to the theoretical limits of standard implementations, and increased robustness and precision with increasing number of observations, in agreement with performance guarantees demonstrated theoretically. By extending the simulated scenarios to multiple scatterers representing realistic mixed-pixel settings, the results also show the capacity of the proposed algorithm to provide an accurate approximation of the average distance to the dominant set of scatterers, along with reliable identification of mixed measurements when these cannot be resolved. This represents a first demonstration of implicit mixed-pixel detection on phase-based EDM, so far only addressed a posteriori over point-cloud data, and establishes a basis for multi-target measurements over single beam lines enabling mixed-pixel-free laser scanning and more versatile EDM applications. The further development of the proposal towards multi-target estimation is now being undertaken. An analytical investigation of the impact of the wavelength configuration on the algorithm performance is also planned, aiming at defining a procedure for optimal wavelength selection under certain measurement conditions.
+
+
+\appendix 
+
+\section{Proof of preliminary lemmas}
+
+Some preliminary lemmas provide necessary background to state and prove the theorems. They claim that the expected value of symmetric probability distributions is found on their symmetry axis, that the argmin of the norm of a noise-perturbed constant is zero and that the angular mean of independently distributed uniformly circular variables is uniformly distributed on the circle. The lemmas are easy to establish but the authors were not able to find them in the literature in a form directly usable for proving the theorems concerning convergence of the distance estimator.
+
+\begin{lem}
+\label{lem:i)}
+Let  $p_X(x)$ be the probability distribution  of a random variable $X$ with finite expectation $E_{p_X}[X]$ and let $p_X(\cdot)$ be symmetric around $\mu$, i.e. $p_X(\mu+x)=p_X(\mu-x)$. Then the expected value is $\mu$.
+\end{lem}
+\begin{pf} The proof relies on the symmetry property $p_X(\mu+z)=p_X(\mu-z) ~~\forall z \in \R$ and some coordinate transforms but is completely elementary otherwise.
+\begin{align}
+    E_{p_X}[X]=\int_{-\infty}^{\infty} x p_X(x)dx&\stackrel{z=x-\mu}{=} \int_{-\infty}^{\infty} (\mu+z)p_X(\mu+z)dz \nonumber \\
+    &= \mu + \int_{-\infty}^0zp_X(\mu+z)dz-\int_{\infty}^0 z p_X9\mu+z)dz \nonumber \\
+    &\stackrel{s=-z}{=} \mu +\int_{-\infty}^0 zp_X(\mu+z)dz - \int_{-\infty}^0 s p_X(\mu+s)ds \nonumber\\
+    &=\mu
+\end{align}
+where we used $\int_{-\infty}^{\infty} p_X(\mu+z)dz=1$. \qed
+\end{pf}
+
+\begin{lem}
+\label{lem:ii)}
+Let $P_X(\cdot)$ be symmetric around $\mu$, i.e. $p_X(\mu-x)=p_X(\mu+x)$. Then $\operatorname{argmin}_{h\in \R}E_{p_X}\left[\|x-h\|_1\right]=\mu$ where $\|\cdot\|_1$ is the 1-norm and $E_{p_X}[\cdot]$ denotes expectation w.r.t. the probability density $p_X(\cdot)$.
+\end{lem}
+
+\begin{pf}
+Note that $d(x-h):=\|x-h\|_1$ as a norm is symmetric $(d(x)=d(-x))$, homogeneous w.r.t. the absolute value of a scalar $\alpha$ $(d(\alpha x)=|\alpha|d(x))$, and satisfies the triangle inequalities \cite[p. 14]{Helmberg1997}. For $p_X(x)$ symmetric around $\mu$, $p_X(\mu+z)$ is symmetric around $0$ in the variable $z=x-\mu$. The expectation $E_{p_X}[\|x-h\|_1]$ of the norm can be simplified as follows.
+\begin{align}
+E_{p_X}[d(x-h)]&=\int_{-\infty}^{\infty}p_X(x)d(x-h)dx \nonumber \\
+&=\int_{-\infty}^{\infty} p_X(\mu+z)d(\mu+z-h)dz \nonumber \\
+&\stackrel{\Delta=h-\mu}{=} \int_{-\infty}^0p_X(\mu+z)d(z-\Delta)dz+\int_{0}^{\infty} p_X(\mu+z)d(z-\Delta)dz \nonumber \\
+&\stackrel{s=-z}{=} \int_{-\infty}^0p_X(\mu+z)d(z-\Delta)dz + \int_{-\infty}^0p_X(\mu-s)d(-s-\Delta)ds \nonumber \\
+\label{eqn:expectation_inequality}
+&\stackrel{\operatorname{symmetry}}{=} \int_{-\infty}^0\underbrace{p_X(\mu+z)}_{\ge 0} \big[ \underbrace{d(z-\Delta)+d(z+\Delta)}_{f_{\Delta}(z)\ge 0}\big]dz
+\end{align}
+Expression \eqref{eqn:expectation_inequality} features only nonnegative terms and since for all  $z\in \R$
+\begin{align}
+2d(z)=d(2z)&\le d(z-\Delta)+d(\Delta-(-z)) \nonumber \\
+&\le d(z-\Delta)+d(z+\Delta)
+\end{align}
+one finds $f_{\Delta}(z) \ge 2d(z) ~~\forall z,\Delta \in \R$. Since $f_{0}(z)=2d(z)$, expression \eqref{eqn:expectation_inequality} is bounded from below by $2\int_{-\infty}^0p_X(\mu+z)d(z)dz$ and the minimum is attained for $\Delta=h-\mu=0$, i.e. $h=\mu$. This implies the claim. \qed
+\end{pf}
+
+\begin{lem}
+\label{lem:iii)}
+Suppose that $\varphi_1, ... ,\varphi_n$ are independently uniformly distributed on $(-\pi, \pi]$. Then the argument $\bar{\varphi}(\varphi_1, ... ,\varphi_n)$ of the complex number 
+\begin{align}
+z(\varphi_1, ... ,\varphi_n)&=\sum_{k=1}^n w_k\exp(i\varphi_k)
+\end{align}
+for $w_k>0, k=1, ... ,n$ arbitrary is uniformly distributed on $(-\pi, \pi]$ as well.
+\end{lem}
+\begin{pf}
+Following the uniqueness argument about the invariance properties of the uniform distribution on the circle put forward in \cite[p. 65]{Mardia2009}, it is enough to show that $\bar{\varphi}(\varphi_1-\alpha, ... ,\varphi_n-\alpha)=\bar{\varphi}(\varphi_1, ... ,\varphi_n)-\alpha$ and $|z(\varphi_1-\alpha, ... , \varphi_n-\alpha)|=|z(\varphi_1, ... ,\varphi_n)|$ to prove that $\bar{\varphi}$ is uniformly distributed on $(-\pi,\pi]$. But this is straightforward to establish as, similar to the unweighted case analyzed in \cite[pp. 16-17]{Mardia2009}, one finds the magnitude to be shift-invariant via 
+\begin{align}
+|z(\varphi_1-\alpha, ... ,\varphi_n-\alpha)|&=|\exp(-i\alpha)z(\varphi_1, ... ,\varphi_n)| \nonumber \\
+&=|z(\varphi_1, ... ,\varphi_n)|
+\end{align}
+whereas the argument of $z$ satisfies
+\begin{align}
+\arg \left[z(\varphi_1-\alpha, ... ,\varphi_n-\alpha)\right] &=\arg\left[ \exp(-i\alpha)|z(\varphi_1, ... ,\varphi_n)|\exp(i \arg\left[z(\varphi_1, ... ,\varphi_n)\right])\right] \nonumber \\
+&=\arg\left[z(\varphi_1, ... ,\varphi_n)\right] \modminus \alpha. 
+\end{align}
+\qed
+\end{pf}
+
+
+\section{Proof of theorem \ref{thm:i)}}
+
+
+
+For the remainder of the appendix, assume that problem \eqref{eqn:AR_optimization} is already correctly solved for $\vec{N}$ with only the variable $d$ still to be determined. The estimate $\hat{d}$ may then be written as
+\begin{align}
+\label{eqn:AR_short}
+\hat{d} =\operatorname{argmin}_{d\in \R_+}\|2\pi(2\Lambda^{-1} \vec{d} - \vec{N})-\phobs\|_1
+\end{align}
+with $\phobs$ the vector of observed wrapped phases and $2\pi (2\Lambda^{-1}\vec{d}-\vec{N})$ the vector of wrapped phases predicted by any choice of $d$. We proceed to argue for the various statements.\\
+
+\begin{pf}
+Due to the stochastic properties of $\epsilon$ the observed $\phobs$ satisfies $\phobs=\widetilde{\varphi}+2\pi \Delta N - \epsilon$ with $\widetilde{\varphi}$ the vector of true underlying phases $\widetilde{\varphi}=2\pi(2\Lambda^{-1} \widetilde{d}-\widetilde{N})$ where $\widetilde{d} $ and $\widetilde{N}$ are the vectors containing the true distances and numbers of full wavecycles respectively. The term $2\pi\Delta N\in \R^n$ accounts for any cycleslips induced by the addition of noise. It then holds that
+\begin{align}
+2 \pi(2\Lambda^{-1} \vec{d}-\vec{N})-\phobs &= 2\pi(2\Lambda^{-1}\vec{d} - \vec{N})-[\widetilde{\varphi}+2\pi \Delta N]+\epsilon \nonumber \\
+&=2\pi(2\Lambda^{-1}\vec{d} - \vec{N})-[2\pi(2\Lambda^{-1} \widetilde{d}-\widetilde{N})+2\pi \Delta N]+\epsilon \nonumber \\
+&= 2\pi \Lambda^{-1}(\vec{d}-\widetilde{d})+2\pi(\widetilde{N}-(\vec{N}+\Delta N))+\epsilon \nonumber \\
+&=4 \pi \Lambda^{-1}\vec{\Delta d} + \epsilon
+\end{align}
+
+where $\vec{\Delta d}=\vec{d}-\widetilde{d}$ and the last equality follows from the assumption that $\vec{N}$ is already correctly determined. This assumption may not hold in practice when the noise $\epsilon$ is big enough to reliably induce cycle slips making the most optimal $\vec{N}$ according to Eq. \eqref{eqn:AR_optimization} differ from the true underlying one. If the $\epsilon_k, k=1, ... ,n$ have probability distribution $p_{\epsilon}(\cdot)$ symmetric around $0$ then we find $E_{p_{\epsilon}}[\epsilon_k]=0$ for all $k$ according to Lemma \ref{lem:i)}. Furthermore, for $\vec{\Delta d}=[\Delta d, ... , \Delta d]^T$, we find that the problem
+\begin{align}
+\label{eqn:AR_noise_minimization_1}
+\min ~~~~& E_{p_{\epsilon}}\left[ \|4 \pi \Lambda^{-1} (\vec{d}-\widetilde{d})+\epsilon\right] \\
+s.t. ~~~~~& d\ge 0  \nonumber 
+\end{align}
+in the optimization variable $\vec{d}=[d, ... ,d]^T \in \R^n_+$ has the relaxation
+\begin{align}
+\label{eqn:AR_noise_minimization_2}
+\min ~~~~& E_{p_{\epsilon}}\left[ \|4 \pi \Lambda^{-1} (\Delta d_v)+\epsilon\right] 
+\end{align}
+in the optimization variable $\Delta d_v=[\Delta d_1, ... ,\Delta d_n]^T\in \R^n$. A relaxation of a minimization problem is a less constrained version of the problem and due to the bigger search space has lower optimum \cite[p. 11] {Boyd2004}. Consequently the minimum of problem \eqref{eqn:AR_noise_minimization_1} is bounded from below by the minimum of problem \eqref{eqn:AR_noise_minimization_2} which is 
+$$ \min_{\vec{\Delta d_v}}E_{p_{\epsilon}}\left[ \|4 \pi \Lambda^{-1} \Delta d_v + \epsilon \|_1\right] = \min_{\Delta d_v} \sum_{k=1}^n E_{p_{\epsilon}}\left[|4\pi \frac{\Delta d_k}{\Lambda_k} + \epsilon_k|\right].$$
+The latter one is achieved by $4\pi \lambda_k^{-1}\Delta d_k=E_{p_{\epsilon}}[\epsilon_k]=0 $ for all $k=1, ..., n$ according to Lemma \ref{lem:ii)}. This choice for $\Delta d_k$ implies  
+\begin{align}
+\label{eqn:relax_min}
+\min_{\Delta d_v} \sum_{k=1}^n E_{p_{\epsilon}}\left[ |4 \pi \frac{\Delta d_k}{\lambda_k} +\epsilon_k|\right]&=\sum_{k=1}^n E_{p_{\epsilon}}[|\epsilon_k|].
+\end{align}
+Since the right hand side of Eq. \eqref{eqn:relax_min} is a lower bound for the minimum of problem \eqref{eqn:AR_noise_minimization_1} and attainable via $\vec{d}=\widetilde{d}$, we have for $\vec{d}=[d, ..., d]^T\in \R^n_+$
+\begin{align}
+\widetilde{d}&=\operatorname{argmin}_{d\ge 0} E_{p_{\epsilon}}\left[ \|4 \pi \Lambda^{-1}(\vec{d}-\widetilde{d})+\epsilon\|_1\right] \nonumber \\
+&=\operatorname{argmin}_{d\ge 0} E_{p_{\epsilon}}\left[\|4\pi \Lambda^{-1}(\vec{d} - \vec{N})-\phobs\|_1\right] \nonumber
+\end{align}
+showing that the minimization formulation leads to the correct estimation on average. \\
+\qed
+\end{pf}
+
+
+
+\section{Proof of theorem \ref{thm:ii)}}
+\label{app:pf_thmii)}
+
+\begin{pf}
+Let the probability distribution $\pe(\cdot)$ of the noise random variable $\epsilon$ be symmetric around $0$ and let $|\epsilon|$ be bounded by a finite constant $c\ge 0$, i.e. $\pe(\epsilon)=0$ for $\epsilon > c$ and $\epsilon <-c$. Denote the average $\ell^1$-norm of residuals in $\R^n$ by $\bar{z_n}$ with 
+\begin{align*}
+\bar{z_n}&=\frac{1}{n}\|2\pi(2\Lambda^{-1} \vec{d} - \vec{N})-\phobs\|_1 \\
+&=\frac{1}{n}\|4\pi \Lambda^{-1}\vec{\Delta d} + \epsilon\|_1 \\
+&=\frac{1}{n} \sum_{k=1}^n |4\pi \lambda_k^{-1} \Delta d + \epsilon_k|
+\end{align*}
+$\Delta d =(d-\widetilde{d})$ and $\vec{\Delta d}_k =\Delta d$ for $k=1, ..., n$. The random variables $\epsilon_k$ are assumed i.i.d. and distributed according to $\pe(\cdot)$ with $\vec{N}$ already correctly determined. Each term $q_k$ in the sum $\bar{z_n}=n^{-1}\sum_{k=1}^nq_k$ is bounded by $ 4\pi \lambda_k^{-1} |\Delta d| +c$ and, assuming $\lambda_{\min}=\min(\lambda_1, ..., \lambda_n) >0$, the sequence $\{\lambda_k^{-1}\}_{k=1}^n$ is bounded from above by the finite constant $\lambda_{\min}^{-1}$ implying $\max(q_1, ..., q_n)=4\pi \lambda_{\min}^{-1}|\Delta d|+c=:b$. Hoeffdings inequality \cite[thm. 2]{Hoeffding1963} then yields
+\begin{align}
+\label{eqn:hoeffding}
+P(|\bar{z_n} - \mu_n|\ge \epsilon)&\le 2 \exp\left(\frac{-2 n \epsilon^2}{b^2}\right) \\
+\mu_n&= \frac{1}{n} \sum_{k=1}^n E_{\pe}\left[|4\pi \lambda_k^{-1} \Delta d + \epsilon_k|\right] \nonumber.
+\end{align}
+Note that the expected value $\mu_n=E_{\pe}[\bar{z_n}]$ has a finite limit since with $a_k=n^{-1}[4 \pi \lambda_{\min}^{-1}|\Delta d|+c]\ge E_{\pe}[|4\pi\lambda_k^{-1}\Delta d + \epsilon_k|]$, the convergent series $\sum_{k=1}^{\infty} a_k$ dominates the series $\operatorname{lim}_{n\rightarrow \infty} \mu_n$. Eq. \eqref{eqn:hoeffding} furthermore implies that $\forall \epsilon >0$ and for all arbitrarily small $\delta >0$ there exists a finite $n$ with $$ n \le (\sqrt{2}\epsilon)^{-1} b^2 \log(2/\delta)$$ such that $P(|\bar{z_n}\ge \epsilon)\le \delta$. Consequently $\lim_{n\rightarrow \infty}P(|\bar{z_n}-\mu_n|\ge \epsilon)=0 ~~ \forall \epsilon >0$. and $\bar{z_n}$ converges to $\mu_n$ in probability.  Following the same argument involving Lemmas \ref{lem:i)} and \ref{lem:ii)} and relaxations of optimization problems as in the explanations surrounding statement i), we find
+$$\min_{d\in \R_+} \mu_n(d) \ge \min_{\Delta d \in \R} \frac{1}{n} \sum_{k=1}^n E_{\pe}\left[| 4\pi \lambda_k^{-1}\Delta d + \epsilon_k|\right] = \frac{1}{n} \sum_{k=1}^n E_{\pe}[|\epsilon_k|]$$ achievable via $\Delta d=\hat{d}-\widetilde{d}=0$. Consequently, at the limit of an infinite number of independent observations, the objective function $\mathcal{L}_2(d,\vec{N},\hatphi)$ yielding the estimate $\hat{d}$ via 
+\begin{align*}
+\hat{d}&=\operatorname{argmin}_{d\in \R_+} \mathcal{L}_2(d,\vec{N},\phobs) \\
+&=\operatorname{argmin}_{d\in R_+} \lim_{n\rightarrow \infty} \frac{1}{n} \|2\pi (2\Lambda^{-1} \vec{d} - \vec{N}) -\phobs\|_1
+\end{align*}
+converges in probability to the objective function $\lim_{n\rightarrow \infty}\mu_n$ whose argmin is $\widetilde{d}$, the true underlying distance value. \\
+\qed 
+\end{pf}
+
+
+
+\section{Proof of theorem \ref{thm:iii)}}
+
+
+\begin{pf}
+The proof is lengthy and involves case distinctions. We will establish that the norm $\lim_{n\rightarrow \infty}n^{-1}\|\hatphi(d)-\phobs\|_1=:\|r\|$ of the residuals is bounded from below or above as per the following. 
+\begin{itemize}
+ \item[i)] $\Delta d_1,\Delta d_2$ rationally independent $\Rightarrow \|r\|=\frac{\pi}{2}$
+\item[ii)] $\Delta d_1 = 0 \Rightarrow \|r\| < |\Delta \psi_1|$ ~~,~~ $\Delta d_2 = 0 \Rightarrow \|r\|< |\Delta \psi_2|,~~ |\Delta \psi_1| \le |\Delta \psi_2|$ 
+ \item[iii)] $\Delta d_1 , \Delta d_2$ rationally dependent, both rational and nonzero $\Rightarrow \|r\|\ge \frac{4}{9}\pi - |\Delta \psi_1|$ 
+ \item[iv)] $\Delta d_1, \Delta d_2$ rationally dependent, both irrational $\Rightarrow \|r\|\ge \frac{\pi}{2} - |\Delta \psi_1|$
+\end{itemize}
+
+
+In the above, $\Delta d_1:=d-d_1$ and $\Delta d_2 =d-d_2$ where $d$ is any guess for the distance and $d_1, d_2$ are the true underlying distances to the surfaces $S_1$, $S_2$ contributing to the mixed pixel situation. Before delving into the separate cases, establish alternative formulations for the phase residuals $\Delta \varphi_k =\hatphi_k(d)-\phobs_k$. Since $\vec{N}=[N_1, ... ,N_n]^T \in \mathbb{Z}^n_+$ has been correctly determined the term $2\pi(2\lambda_k^{-1} d - N_k)-\phobs_k $ is an element of $(-\pi,\pi]$ for $k=1, ..., n$. The $k-$th observation $\phobs_k$ can alternatively be written as
+$$\phobs_k=\atan\left(\frac{w_1\sin \varphi^1_k + w_2 \sin \varphi^2_k}{w_1 \cos \varphi_k^1 + w_2 \cos \varphi_k^2}\right)$$
+where $\varphi_k^1=2\pi(2\lambda_k^{-1}d_1 -N_k^1) \in (-\pi,\pi]$ and $\varphi_k^2=2\pi(2\lambda_k^{-1}d_2 - N^2_k)\in (-\pi,\pi]$ are the wrapped phase values associated to surfaces $S_1$ and $S_2$ in distances $d_1$ and $d_2$ to the instrument gathering the observations. Then the $\atan$-addition theorem ensuring $$\atan \left(\frac{y_1}{x_1}\right)+\atan \left(\frac{y_2}{x_2}\right)=\atan \left(\frac{y_1x_2+y_2x_1}{x_1x_2-y_1y_2}\right)$$ hold. Denoting by $\hatphi_k(d)$ the term $2\pi(2\lambda_k^{-1}d - N_k)$ offering predictions for the $k-$th observed phase value based on an assumed distance $d$ to the backscattering surface, one finds the following identities. 
+\begin{align}
+\hatphi_k(d)-\phobs_k &=\atan\left( \frac{\sin \hatphi_k(d)}{\cos \hatphi_k(d)}\right)-\atan\left(\frac{w_1\sin \varphi^1_k + w_2 \sin \varphi^2_k}{w_1 \cos \varphi_k^1 + w_2 \cos \varphi_k^2}\right) \nonumber \\
+&=\atan\left(\frac{w_1\sin (\hatphi_k(d)-\varphi^1_k) + w_2 \sin(\hatphi_k(d)- \varphi^2_k)}{w_1 \cos(\hatphi_k(d)- \varphi_k^1) + w_2 \cos (\hatphi_k(d)-\varphi_k^2)}\right) \nonumber \\
+\label{eqn:phase_sum}
+&=\atan\left(\frac{w_1\sin \Delta \varphi^1_k + w_2 \sin \Delta \varphi^2_k}{w_1 \cos \Delta \varphi^1_k + w_2 \cos \Delta \varphi^2_k}\right)
+\end{align}
+where $\Delta \varphi_k^1=\hatphi_k^1(d)-\varphi_k^1$ and $\Delta \varphi_k^2=\hatphi_k^2(d)-\varphi_k^2$ quantify the discrepancy between predicted phase values based on an assumed distance $d$ and the underlying correct distances $d_1,d_2$ to surfaces $S_1$ and $S_2$. Notice furthermore that due to the $\atan$-addition theorem
+\begin{align}
+\atan\left(\frac{w_1\sin \varphi^1_k + w_2 \sin \varphi^2_k}{w_1 \cos \varphi_k^1 + w_2 \cos \varphi_k^2}\right)&=\varphi^1_k +\atan\left(\frac{\sin(\varphi^2_k-\varphi^1_k)}{\frac{w_1}{w_2}+\cos(\varphi^2_k-\varphi^1_k)}\right)
+\end{align}
+This implies two alternative formulations of Eq. \eqref{eqn:phase_sum}, whose explicit dependence on $\varphi_1$ and $\varphi_2$ will be made use of later.
+\begin{align}
+\label{eqn:dphi_1}
+\hatphi_k(d)-\phobs_k&=\Delta \varphi_k^1+\atan\left(\frac{\sin(\varphi_k^1-\varphi_k^2)}{\frac{w_1}{w_2}+\cos(\varphi_k^1-\varphi_k^2)}\right) \\
+\label{eqn:dphi_2}
+&=\Delta \varphi_k^2+\atan\left(\frac{\sin(\varphi_k^2-\varphi_k^1)}{\frac{w_2}{w_1}+\cos(\varphi_k^2-\varphi_k^1)}\right)
+\end{align}
+
+
+$\bullet$ Case i): We proceed to show that the sequence of residuals $\{\hatphi_k(d)-\phobs_k\}_{k=1}^{\infty}$ is equidistributed on the circle if the quantities $\Delta d_1$ and $\Delta d_1$ are rationally independent.
+%not certain conditions hold that imply $d=d_1$ to minimize $\lim_{n\rightarrow \infty} \frac{1}{n} \sum_{k=1}^n|\hatphi_k(d)-\phobs_k|$, the average of the absolute residuals in the limit of infinitely many observations. 
+Notice that expression \eqref{eqn:phase_sum} is the argument of the complex number 
+\begin{align}
+\label{eqn:complex_delta}
+z_k=w_1\exp(i\Delta \varphi_k^1)+w_2\exp(i\Delta \varphi_k^2)
+\end{align}
+and that according to lemma \ref{lem:iii)} $\hatphi_k(d)-\phobs_k$ is uniformly distributed on the circle if $\Delta \varphi_k^1$ and $\Delta \varphi_k^2$ are. 
+ The multidimensional Weyl criterion \cite[p. 48]{Kuipers2012} asserts that a sequence $\{\beta_k\}_{k=1}^{\infty}\subset [0,1]^d$ is uniformly equidistributed if and only if $\forall m \in \mathbb{Z}^d\backslash \{0\}$
+ \begin{align}
+ \label{eqn:Weyl}
+ \lim_{n\rightarrow \infty} \frac{1}{n} \sum_{k=1}^{n} \exp\left( 2 \pi i \langle \beta_k,m\rangle_{\R^d}\right)=0
+ \end{align}
+where $\langle \cdot,\cdot\rangle_{\R^d}$ denotes the scalar product between vectors in $\R^d$. Such sequences $\{\beta_k\}_{k=1}^{\infty}$ are results of ergodic transformations and for any continuous function $f:\R^d\rightarrow \R$, averages over point evaluations $f(\beta_k), k=1, ...,n$ converge to the integral of $f$ against the uniform measure according to the Birkhoff ergodic theorem and one finds \cite[p. 48]{Kuipers2012} 
+\begin{align}
+\label{eqn:ergodic}
+\lim_{n\rightarrow \infty} \frac{1}{n} \sum_{k=1}^n f(\beta_k) = \int_{[0,1]^d}f(x)dx.
+\end{align}
+If the sequence $\{\Delta_k^1,\Delta_k^2\}_{k=1}^{\infty} = \{(2\pi)^{-1}(\Delta \varphi_k^1 + \pi), (2\pi)^{-1}(\Delta \varphi_k^2)\}_{k=1}^{\infty}$ is equidistributed on $[0,1]^2$, then ergodicity property \eqref{eqn:ergodic} and Eq. \eqref{eqn:phase_sum} yield an alternative expression for the limit of the average of the absolute residuals $f(\Delta_k^1,\Delta_k^2)=|\hatphi_k(d) - \phobs_k|$ of the form
+\begin{align}
+\lim_{n\rightarrow \infty} \frac{1}{n}\sum_{k=1}^n |\hatphi_k(d)-\phobs_k|&=\lim_{n\rightarrow \infty}\frac{1}{n}\sum_{k=1}^n f(\Delta_k^1,\Delta_k^2) \nonumber \\
+&=\int_{[0,1]^2}f(\Delta_1,\Delta_2)d\Delta_1 d\Delta_2 \nonumber \\
+\label{eqn:ergodic_expectation}
+&= E_{\Delta_1 \Delta_2}[f(\Delta_1,\Delta_2)].
+\end{align}
+The right hand side of Eq. \eqref{eqn:ergodic_expectation} is the expectation of $f(\cdot,\cdot)$ w.r.t. the uniform random variables $\Delta_1,\Delta_2$ which , by the change of variables theorem for expectations \cite[p. 113]{Capinski2013} and Lemma \ref{lem:iii)} can be rewritten as 
+\begin{align}
+E_{\Delta_1,\Delta_2}\left[ f(\Delta_1,\Delta_2)\right] =E_{\Delta\varphi \sim \mathcal{U}_{(-\pi,\pi]}} [|\Delta \varphi|] &=\frac{1}{2} \pi
+\end{align}
+for $\Delta \varphi$ a uniformly distributed random variable on the circle. We may summarize: If the sequence $\{(\Delta\varphi_k^1,\Delta \varphi_k^2)\}_{k=1}^{\infty}$ satisfies $\lim_{n\rightarrow \infty} \frac{1}{n}\sum_{k=1}^n \exp\left( i (m_1 \Delta \varphi_k^1+m_2 \Delta \varphi_k^2)\right)=0$, then $\lim_{n\rightarrow\infty}\frac{1}{n}\|\hatphi(d)-\phobs\|_1=\frac{1}{2}\pi$.
+Since by assumption $\lambda_k=(c_0+k \Delta)^{-1}$, $\{\lambda_k\}_{k=1}^n$ is a finite monotonically decreasing sequence contained in the interval $[0,\lambda_{\max}]\subset\R^+$. Employing $\Delta \varphi_k^j=4 \pi \lambda_k^{-1}\Delta d_j + 2 \pi\Delta N_j$ for $j=1,2$ and $\Delta N_j \in \mathbb{Z}$, the quantity $W_n(m,\beta)=\frac{1}{n} \sum_{k=1}^n \exp(2\pi i \langle \beta, m\rangle_{\R^2}$ appearing in the Weyl criterion simplifies to
+\begin{align}
+W_n\left(m,\{(\Delta_k^1,\Delta_k^2)\}_{k=1}^{\infty}\right) & = \frac{1}{n} \sum_{k=1}^n \exp\left( 4 \pi i \lambda_k^{-1}[m_1\Delta d_1 + m_2\Delta d_2]\right) \nonumber \\
+&= \frac{1}{n} \sum_{k=1}^n \left[\exp\left(4 \pi i [m_1\Delta d_1 +m_2\Delta d_2]\right)\right]^{c_0+k\Delta} \nonumber \\
+\label{eqn:Weyl_applied}
+&=\frac{c}{n} \sum_{k=1}^n z^k
+\end{align}
+where $c=\exp\left(4 \pi i c_0[m_1\Delta d_1 +m_2\Delta d_2]\right)$ and $z=\exp\left(4 \pi i \Delta [m_1\Delta d_1+m_2\Delta d_2]\right)$. Eq. \eqref{eqn:Weyl_applied} contains a geometric series and
+\begin{align}
+\left|n(1-z)W_n\left(m,\{(\Delta_k^1,\Delta_k^2)\}_{k=1}^{\infty}\right) \right| & =\left|c \sum_{k=1}^n z^k - z^{k+1}\right| \nonumber \\
+&= |c(z^1-z^{n+1})| \nonumber \\
+&\le 2
+\end{align}
+leading to the upper bound
+\begin{align}
+\label{eqn:Weyl_bound}
+\left|W_n\left(m,\{(\Delta_k^1,\Delta_k^2)\}_{k=1}^{\infty}\right) \right| \le \left|\frac{2}{n(1-\exp\left(4\pi i \Delta [m_1\Delta d_1+m_2\Delta d_2]\right))}\right|
+\end{align}
+which converges to $0$ for $n\rightarrow \infty$ for all cases where the denominator on the right hand side of Eq. \eqref{eqn:Weyl_bound} is not zero. The denominator is zero if $\exists (m_1,m_2)\in \mathbb{Z}^2\backslash \{0\}$ such that $m_1\Delta d_1+m_2\Delta d_1=0$; or in other words if $(d-d_1)=\Delta d_1$ and $(d-d_2)=\Delta d_2$ are rationally dependent. Conversely, $\lim_{n\rightarrow\infty}\frac{1}{n}\|\hatphi(d)-\phobs\|_1=\frac{1}{2}\pi$ for $\Delta d_1 ,\Delta d_2$ rationally independent. \\
+
+In the case where $\Delta d_1$ and $\Delta d_2$ are rationally  dependent, the minimum of $|\hatphi_k(d)-\phobs_k|$ is achieved for $\Delta d_1=0$ Proving this, requires an analysis of the three different cases associated to the criterion
+\begin{align}
+\label{eqn:rational_dependence_2}
+m_1\Delta d_1 + m_2\Delta d_2 &=0
+\end{align}
+for $(m_1,m_2)\in \Z^2 \backslash \{0\}$. It might be that ii) one of the two integers $m_1,m_2$ is zero, iii) both are nonzero and $\Delta d_1, \Delta d_2$ are rational, or iv) both are nonzero and $\Delta d_1, \Delta d_2$ are irrational.\\
+
+$\bullet$ Case ii): If $m_2$=0, then $m_1 \neq 0$ and $\Delta d_1=0$. Employing equations  \eqref{eqn:dphi_1} and \eqref{eqn:dphi_2} we find
+\begin{align}
+\label{eqn:dphi_3}
+\hatphi_k(d)-\phobs_k & = \underbrace{\atan\left( \frac{\sin (\varphi_k^1 - \varphi_k^2)}{\frac{w_1}{w_2} + \cos( \varphi_k^1 -\varphi_k^2)}\right)}_{\Delta \psi_1(\varphi_k^1-\varphi_k^2)}.
+\end{align}
+For the alternative of $m_1=0$, $m_2\neq0$ and $\Delta d_2=0$, the resulting expression is 
+\begin{align}
+\label{eqn:dphi_4}
+\hatphi_k(d)-\phobs_k & = \underbrace{\atan\left( \frac{\sin( \varphi_k^2 - \varphi_k^1)}{\frac{w_2}{w_1} + \cos (\varphi_k^2 -\varphi_k^1)}\right)}_{\Delta \psi_2(\varphi_k^2-\varphi_k^1)}. 
+\end{align}
+Now notice that $|\Delta \psi_2(\varphi^2_k-\varphi_k^1)|=|\Delta \psi_2(\varphi_k^1-\varphi_k^2)|$ since $\atan(-y/x)=-\atan(y/x)$ for all $(y,x)$ with $y\neq 0 $ or $x >0$, where the special situation $(y,x)=(0,0)$ is precluded by $w_1 >w_2$ and $\atan(0/x)=\pi$ for $y=0$ and $x \le 0$ is consistent with the statement as well. As $w_1>w_2$, $\frac{w_1}{w_2}+\cos(\varphi_k^1-\varphi_k^2)$ is always positive and greater than $\frac{w_2}{w_1} + \cos(\varphi_k^1-\varphi_k^2)$ by a positive constant $A$. As for any $y,x$ with $y\neq 0$ or $x>0$ and $\varphi=\atan(y/x)$ one finds $\sign(\varphi)=\sign(y)$, we have
+\begin{align}
+\sign\left(\frac{\partial }{\partial x}\atan \left(\frac{y}{x}\right)\right)&= \sign \left(\frac{-y}{\sqrt{x^2+y^2}}\right) = -\sign(y)=-\sign(\varphi)
+\end{align}
+and any decrease in $x$ adds to $\varphi$ an increment of sign $\sign(\varphi)$ thereby increasing its absolute value away from zero. Then $$\left| \atan\left(\frac{y}{x-A}\right)\right| > \left|\atan\left(\frac{y}{x}\right)\right| $$ $\forall A > 0$ and $y\neq 0 $ or $x >0$. But this is exact the relation between $|\Delta \psi_1 (\varphi_k^1-\varphi_k^2)|$ and $|\Delta \psi_2(\varphi_k^1-\varphi_k^2)|$ and we find
+\begin{align}
+\left|\atan\left(\frac{\sin( \varphi_k^1-\varphi_k^2)}{\frac{w_1}{w_2}+\cos( \varphi_k^1-\varphi_k^2)}\right)\right| <\left|\atan\left(\frac{\sin( \varphi_k^2-\varphi_k^1)}{\frac{w_2}{w_1}+\cos( \varphi_k^2-\varphi_k^1)}\right)\right|.
+\end{align}
+This establishes $|\Delta \psi_1|<|\Delta \psi_2|$ for all input arguments and implies $\Delta d_1=0$ as the case leading to lesser residuals than $\Delta d_2=0$. \\
+
+$\bullet$ Case iii): Suppose $\Delta d_1$ and $\Delta d_2$ are both nonzero, rationally dependent and rational numbers themselves. Then $\hatphi_k(d)-\phobs_k$ is the angle of the complex number 
+\begin{align}
+z_k&=w_1e^{4\pi i \lambda_k^{-1} \Delta d_1} = w_2 e^{4 \pi i \lambda_k^{-1} \Delta d_2} \nonumber \\
+&=w_1 e^{ic_1}\left(e^{4\pi i \Delta d_1 \Delta }\right)^k + w_2e^{ic_2} \left(e^{4\pi i \Delta d_1 \Delta} \right)^k
+\end{align}
+with $c_1 = 4 \pi c_0\Delta d_1$ and $c_2=4\pi c_0\Delta d_2$. Since $\Delta d_1$ and $\Delta d_2$ are both rational, $2 \Delta d_1 \Delta = l_1/l_2$ with $l_1,l_2\in \Z$. Consequently for the integer $l_2$, we have $l_2 \Delta d_1 \Delta \in \Z$ and $\left(e^{4 \pi i \Delta d_1 \Delta}\right)^{l_2}=1$. The complex number 
+\begin{align}
+z_q:&=e^{4\pi i \Delta d_1 \Delta }
+\end{align}
+is therefore a $q$-th root of unity with $q$ at most $l_2$. We proceed to show that for phase-shifted $q$-th roots of unity, their average absolute phase in the limit of infinite observations is at least $\pi(1/2-1/(2q^2))$ and under the conditions of the theorem $\lim_{n\rightarrow \infty} n^{-1} \sum_{k=1}^n |\varphi\left( e^{ic_1} z_q^k\right)|\ge \frac{4}{9}\pi$.
+First of all, since $z_q^{k+q}=e^{4 \pi i \Delta d_1 q \Delta } e^{4\pi i \Delta d_1 k \Delta}=e^{4\pi i \Delta d_1 k \Delta}=z_q^k$, it is clear that
+\begin{align}
+\lim_{n\rightarrow \infty} \frac{1}{n}\sum_{k=1}^n |\varphi(z_q^k)|& = \lim_{m\rightarrow \infty} \frac{1}{m} \sum_{l=1}^m \left[ \frac{1}{q} \sum_{k=1}^q |\varphi(z_q^k)|\right] \nonumber \\
+&=\frac{1}{q} \sum_{k=1}^q |\varphi(z_q^k)|.
+\end{align}
+Denoting by $\varphi_{\Sigma}(1,z_q)$ the term $q^{-1} \sum_{k=1}^q|\varphi ( 1 z_q^k)|$, it is necessary to establish lower bounds for $\varphi_{\Sigma}(e^{i\theta},z_q)=q^{-1} \sum_{k=1}^q |\varphi(e^{i \theta} z_q^k)|$, the average absolute phase of the $q$ complex $q$-th roots of unity phase-shifted by $\theta$. The set $\{ z_q^1 , ..., z_q^q\}$ gets mapped onto itself by the transformation $e^{2\pi i q^{-1}}$ since $e^{2\pi i q^{-1}} z_q^k=z_q^{k+1}$. Therefore $\varphi_{\Sigma}(e^{i\theta + 2 \pi i q^{-1}},z_q)=\varphi_{\Sigma}(e^{i\theta},z_q)$. Because any phase shift $\alpha \in (-\pi,\pi]$ may be written as $2 \pi n \frac{1}{q} +\theta$ with $|\theta|\le \frac{\pi}{q}$ and $n\in \Z$, it is enough to bound $\varphi_{\Sigma}(e^{i\theta}, z_q)$ for $\theta:|\theta| \le \frac{q}{q}$ to derive a statement valid for all phase shifts.
+The $q$-th root of unity $z_q$ may be written as $z_q=e^{2 \pi i \frac{1}{q}}$ implying $z_q^k=e^{2\pi i \frac{k}{q}}$. For phases bound to lie in $(-\pi,\pi]$, we furthermore have 
+\begin{align}
+\varphi(z_q^k)&=\begin{cases}2 \pi \frac{k}{q} ~~~0 \le k \le q_h \\  \\ 2 \pi \frac{(k-q)}{q} ~~~ q_h < k \le q \end{cases}
+\end{align}
+where $q_h = \lfloor q/2 \rfloor$ and $\lfloor \cdot \rfloor$ is the floor operator. \\
+
+Suppose now $q$ even and partition the indices $ I=\{0, ... , q-1\}$ into two subsets $I_u=\{0, ... ,q_h-1\}$ and $I_l=\{q_h, ..., q-1\}$ corresponding roughly to the half of the roots in the upper and lower half planes. It holds that $I_u \cap I_l = \empty, |I_u|=q_h, |I_l|=q_h$, and $I_u \cup I_l=I$. For each $k\in I_u$, $q_h+k$ is a unique index in $I_l$ establishing a bijection between $I_u$ and $I_l$. Then
+\begin{align}
+\frac{1}{q} \sum_{k\in I} |\varphi(z_q^k)|  =\frac{1}{q} \left[ \sum_{k\in I_u} |\varphi(z_q^k)| + |\varphi(z_q^{q_h+k})|\right] &=\frac{1}{q} \left[ \sum_{k\in I_u} \left( \frac{2 \pi}{q} k - \frac{2 \pi}{q}(q_h+k-q)\right)\right] %\nonumber \\
+%&=\frac{2 \pi}{q^2}\left[ \sum_{k\in I_u} q_h\right] \nonumber \\
+&=\frac{\pi}{2}
+\end{align}
+This establishes $\varphi_{\Sigma}(1,z_q) =\frac{\pi}{2}$. To even establish $\varphi_{\Sigma}(e^{i\theta},z_q)=\frac{\pi}{2}$, note that with $|\theta|\le \pi/q$ it holds that $|\varphi(e^{i\theta} z_q^k)|=\varphi(z_q^k)+\theta$ for $k\in I_u \setminus \{0\}$ whereas $|\varphi(e^{i\theta} z_q^k)|=\varphi(z_q^k)-\theta$ for $k\in I_l\setminus \{q_h\}$. Furthermore $|\varphi(e^{i\theta} z_q^0)|=|\varphi(z_q^0)|+|\theta|$ and $|\varphi(e^{i\theta} z_q^{q_h})|=|\varphi(z_q^{q_h})|-|\theta|$. This implies $$\varphi_{\Sigma}(e^{i\theta},z_q)=\frac{1}{q}\sum_{k\in I_u}|\varphi(e^{i\theta}z_q^k)|+|\varphi(e^{i\theta} z_q^{q_h+k})|=\varphi_{\Sigma}(1,z_q)+(q_h-1)\theta - (q_h-1)\theta+|\theta|-|\theta|=\varphi_{\Sigma}(1,z_q).$$
+
+Suppose now $q$ odd and partition the index set $I=\{0, ... ,q-1\}$ into three subsets $I_u=\{1, ... ,q_h\}, I_l=\{q_h+1, ... ,q-1\}$ and $I_0=\{0\}$. The sets are pairwise disjoint and $I_0\cup I_u\cup I_l=I$ with $|I_0|=1,|I_u|=|I_l|=q_h$. For each $k\in I_u$, $q-k$ is a unique index in $I_l$ establishing a bijection between $I_u$ and $I_l$. Since $|\varphi(z_q^k)|=\frac{2\pi}{q} k$ and $|\varphi(z_q^{q-k})|=|\frac{2\pi}{q} (q-k-q)|=\frac{2 \pi}{q} k$, one finds $|\varphi(z_q^k)|=|\varphi(z_q^{q-k})|$ and the average absolute angle of the pairing $I_u \ni k$ with $q-k\in I_l$ is $2 \frac{2 \pi}{q} k$. The total average of the absolute angles is
+\begin{align}
+\frac{1}{q} \sum_{k\in I} |\varphi(z_q^k)| =\frac{1}{q}\left[ \sum_{k\in I_0} |\varphi(z_q^k)|+\sum_{k\in I_u} |\varphi(z_q^k)|+\sum_{k\in I_l} |\varphi(z_q^k)|\right] &=\frac{2}{q} \sum_{k\in I_u}|\varphi(z_q^k)| =\frac{4\pi}{q^2}\sum_{k=1}^{q_h}k =\frac{\pi}{2}(1-\frac{1}{q^2}).
+\end{align}
+This establishes $\varphi_{\Sigma}(1,z_q)=\frac{\pi}{2}(1-\frac{1}{q^2})$. To establish $\varphi_{\Sigma}(e^{i\theta} ,z_q)\ge \frac{\pi}{2}(1-\frac{1}{q^2})$ note that with $|\theta|\le \pi/q$ it holds that $|\varphi(e^{i\theta}z_q^k)|=|\varphi(z_q^k)|+\theta$ for $k\in I_u$ whereas $|\varphi(e^{i\theta}z_q^k)|=|\varphi(z_q^k)|-\theta$ for $k\in I_l$ and $|\varphi(e^{i\theta}z_q^k)|=|\theta|$ for $k\in I_0$. This implies
+\begin{align}
+\varphi_{\Sigma}(e^{i\theta},z_q)=\frac{1}{q}\sum_{k\in I} |\varphi(e^{i\theta}z_q^k)|&=\frac{1}{q}\left[\sum_{k\in I_0} |\varphi(e^{i\theta}z_q^k)|+\sum_{k\in I_u} |\varphi(e^{i\theta}z_q^k)|+\sum_{k\in I_l} |\varphi(e^{i\theta}z_q^k)|\right]\nonumber \\
+&=\frac{1}{q}\left[|\theta|\right] +\varphi_{\Sigma}(1,z_q) \nonumber \\
+&\ge \varphi_{\Sigma}(1,z_q)
+\end{align}
+Since $q=1$ is ruled out by the condition of the theorem demanding $d\in (d_1-\frac{1}{2\Delta},d_1+\frac{1}{2\Delta})$ and thereby $(2\Delta)\Delta d_1 <1$, the minimum possible value of $ \lim_{n\rightarrow \infty}n^{-1}\|\hatphi(d)-\phobs\|_1$ is $\frac{\pi}{2}(1-\frac{1}{q^2})$ for $q=3$. If $\frac{\pi}{2}(1-\frac{1}{q^2})=\frac{4}{9}\pi$ is the minimum possible average absolute value of the angles of the sequence $\{e^{i\theta}z_q^k\}_{k=1}^{\infty}$, then the average angles of $z_k=w_1e^{ic_1} z_q^k+w_2e^{ic_2}z_p^k$ can be bounded from below by 
+\begin{align}
+\frac{1}{q}\sum_{k=1}^q|\varphi(z_k)|\ge \frac{1}{q} \sum_{k=1}^q |\varphi(w_1 e^{ic_1} z_q^k)|-|\Delta \psi(w_1/w_2)| \ge \frac{4}{9} \pi -|\Delta \psi(w_1/w_2)|.
+\end{align}
+If $w_1 >1.6 w_2$, then $\frac{4}{9}\pi - |\Delta \psi(w_1/w_2)|> |\Delta \psi(w_1/w_2)|$ and the lower bound for the residuals in the case where $\Delta d_1, \Delta d_2$ are nonzero and rational is bigger than the upper bound for the case $\Delta d_1=0$. \\
+
+
+$\bullet$ Case iv): Suppose that $\Delta d_1$ and $\Delta d_2$ are rationally dependent with $m_1\neq0,m_2\neq0$ and $\Delta d_1$ is irrational. Then with $d=\delta d_1 + d_1$, Eq. \eqref{eqn:complex_delta} yields
+\begin{align}
+	\frac{1}{n} \sum_{k=1}^n |\hatphi_k(d)-\phobs_j| =\frac{1}{n}\sum_{k=1}^n |\varphi(z_k)| &=\frac{1}{n}\sum_{k=1}^n\left|\varphi\left( w_1 e^{4 \pi i \lambda_k^{-1}\Delta d_1} + w_2 e^{4 \pi i \lambda_k^{-1}\Delta d_2}\right)\right| \nonumber \\
+	& \ge \frac{1}{n} \sum_{k=1}^n \min_{|z_k^{\operatorname{inf}}|=w_2} \left|\varphi \left(w_1 e^{4\pi \lambda_k^{-1}\Delta d_1} + z_k^{\operatorname{inf}}\right)\right| \nonumber \\
+	& \ge \frac{1}{n} \sum_{k=1}^n \left|\varphi\left( e^{4 \pi i \lambda_k^{-1} \Delta d_1} \right)\right|-\left|\Delta \psi\left(\frac{w_1}{w_2}\right)\right|
+\end{align}
+where $|\Delta \psi (w_1/w_2)|$ is determined according to Eq. \eqref{eqn:psi_bound}. For $\Delta d_1$ irrational and $\lambda_k \in \mathbb{Q}$, $2 \lambda_k^{-1}\Delta d_1$ is irrational and the sequence $\{4 \pi \lambda_k^{-1} \Delta d_1\}_{k=1}^{\infty}$ is uniformly distributed on the circle. Consequently
+\begin{align}
+\lim_{n\rightarrow \infty} \frac{1}{n} \|\hatphi(d)-\phobs\|_1 & \ge \lim_{n\rightarrow \infty} \frac{1}{n} \sum_{k=1}^n \left|\varphi\left( e^{4 \pi \lambda_k^{-1}\Delta d_1}\right) \right| -|\Delta \psi| \nonumber \\
+&\ge E_{\varphi \sim \mathcal{U_{(-\pi,\pi]}}}|\varphi|-|\Delta \psi| \nonumber \\
+&\ge \pi/2 -|\Delta \psi| .	
+\end{align}
+The lower bound on the phase residuals is then $\pi/2-|\Delta \psi|$. It is bigger than the upper bound $|\Delta \psi|$ on the phase residuals for the case $\Delta d_1=0$ if $\pi/2-|\Delta \psi|>|\Delta \psi|$, i.e. if $|\Delta \psi|< \pi/4$ which is the case if $w_1 >(\cos(\pi/4))^{-1}w_2$. This is true for $w_1>1.6 w_2$. \\
+
+Therefore, out of all investigated choices for $d$, $d=d_1$ has the smallest residuals if $w_1> 1.6 w_2$ The investigated cases include $(d-d_1)$ and $(d-d_2)$ being rationally independent and all possible cases of $(d-d_1)$ and $(d-d_2)$ being rationally dependent ($m_1=0$ or $m_2=0$ or both nontrivial with rational or irrational $\Delta d_1$ and $\Delta d_2$). This concludes the proof.
+
+
+
+
+\end{pf}
+
+\begin{comment}
+
+\section{Old Content to be stored in a different file for later use}
+
+In what follows, it will be assumed that any weights $w_k$ in the weighted sum $\zobs=\sum_{l=1}^{\nmix} w_kz_k$ are independent of the (modulation) wavelength $\lambda$ used to perform the interferometric measurements and that furthermore the reflecting surface does not impart any phase shift on backscattered waves such that the observation equation for interferometric measurements may be written as
+\begin{align}
+    \zobs(\lambda) &=\sum_{l=1}^{\nmix} w_lz_l(\lambda) \\
+    z_l &=\exp\left( 2 \pi i \left(\frac{2 d_l}{\lambda} - N_l(\lambda)\right)\right) = \exp\left(i \varphi_l(\lambda)\right)
+\end{align}
+In the above, $|z_l|=1$, the $d_l \in \R_+$ are the distances between sensor and surface $S_l$ and $N_l \in \N$ for $l=1 , ... ,\nmix$. Suppose $\zobs$ is observed for the $\nobs$ different wavelengths $\{\lambda_k\}_{k=1}^{\nobs}$ via its phase value $\varphi_k$ and amplitude $a_k$ as encoded in the observation equation
+\begin{align}
+\label{eqn:observation}
+    z&= Q w ~~~~ Q\in \C^{\nobs}\times \C^{\nmix} , w\in \R_+^{\nmix}
+\end{align}
+where $(z)_k =a_k\exp\left( i \varphi_k^{\text{obs}}\right) $ are the observations, $Q$ with $(Q)_{kl}=\exp(i\varphi_{kl})$ is a matrix of complex numbers with unit norm representing the phase $\varphi_{kl}$ contributed to the $k$-th observation gathered with wavelength $\lambda_k$ by the reflecting surface $S_l$ in distance $d_l$ with reflectance $w_l$. Equation \eqref{eqn:observation} is a system of $2 \nobs$ equations linking the real and imaginary parts of the observations $(z)_k=\zobs(\lambda_k)$ to the $\nmix(\nobs+1)$ unknowns $w_l, l=1, ... ,\nmix$ and $\varphi_{kl}, k=1, ... ,\nobs, l=1, .... ,\nmix$. It suggests the term $\|z-Qw\|_2$ as a measure of discrepancy for evaluating how closely the predicted observations $Qw$ match the actually observed ones recorded in $z\in \C^{\nobs}$.
+
+Note that for $\nmix \ge 2$, the $\nmix \nobs$ equations are constraining $\nmix \nobs +\nmix$ unknowns. In this case, the system is underdetermined and the consistency criterion $\|z-Qw\|_2\rightarrow \min$ typically permits multiple solutions $w^{\ast}\in \R^{\nmix}_+, \hat{\varphi}\in \R^{\nobs}\times \R^{\nmix} $ for $(\hat{\varphi})_{kl}=\varphi_{kl}$ and $Q=:e^{i\hatphi}$ with  $(Q)_{kl}=\exp(i\varphi_{kl})$. When $\nmix=1$ the unique (up to multiples of $ 2 \pi$) solution can be found as
+\begin{align}
+    w^*,\hatphi^* & =\underset{w_1\in \R_+ \hatphi\in \R^{\nobs}}{\operatorname{argmin}}\|z- e^{i\hatphi}w\|_2 \\
+    w^* &= (\nobs)^{-1}\sum_{k=1}^{\nobs}|z_k|=(\nobs)^{-1}\sum_{k=1}^{\nobs}a_k \\
+    \label{eqn:phi_optimal}
+    \hatphi^*&=[\varphi_1^{\text{obs}}, ... ,\varphi_{\nobs}^{\text{obs}}]^T\in \R^{\nobs}.
+\end{align}
+This follows from 
+\begin{align}
+    \|z-e^{i\hatphi}w\|_2^2&=\sum_{k=1}^{\nobs}|z_k-e^{i\varphi_k}w|^2=\sum_{k=1}^{\nobs}|a_ke^{i\varphi_k^{\text{obs}}}-we^{i\varphi_k}|^2 \nonumber \\
+    \label{eqn:trivial_min}
+    &=\sum_{k=1}^{\nobs}a_k^2+w^2-a_kw\underbrace{\left( e^{i(\varphi^{\text{obs}}_k-\varphi_k)} + e^{i(\varphi_k-\varphi_k^{\text{obs}})}\right)}_{p(\varphi)}
+\end{align}
+since $a_k, w\ge 0$ minimizing expression \eqref{eqn:trivial_min} w.r.t. $\varphi_k$ equates to maximizing the sum $p(\varphi)$ of two unit-norm complex variables. This is achieved by setting $\varphi_k=\varphi_k^{\text{obs}}$ for an objective value of $p(\varphi)=2$. Subsequently taking derivatives w.r.t $w$ and enforcing them to be $0$ leads to the equation $2\sum_{k=1}^{\nobs} a_k=2 \nobs w$ which is the case iff $w = (\nobs)^{-1}\sum_{k=1}^{\nobs}a_k$. The best guesses for the phases are simply the observed ones in this case.
+
+For situations involving mixed pixels, the consistency criterion is not enough to determine $\hatphi$ and $w$ and needs to be supplemented by a term measuring the discrepancy between the fictitious measurements $\varphi_{kl}$ assumed in $Qw=z$ and what is well explainable via the received signal being a superposition of  measurements to $\nmix$ surface $S_l$ in distances $d_l$ to the sensor. For jointly estimating $\{w_l\}_{l=1}^{\nmix} \subset \R_+, \{d_l\}_{l=1}^{\nmix}\subset \R_+, \{\varphi_{kl}\}_{(k,l)=(1,1)}^{(\nobs,\nmix)}\subset[-\pi,\pi]$ and the numbers of full wavecycles $\{N_{kl}\}_{(k,l)=(1,1)}^{(\nobs,\nmix)} \subset \N$ based on measurements of amplitudes $a_k$ and phases $\varphi^{\text{obs}}_k$ in form of the vector $z\in \C^{\nobs}$ with $(z)_k=a_ke^{i\varphi_k^{\text{obs}}}$, we propose to solve an optimization problem in the optimization variables $\hatphi, d,w,N$ that takes on the following form.
+
+\begin{align}
+\label{eqn:abstract_optimization}
+    \underset{\hatphi,d}{\min} ~~~~ & \mathcal{L}_1(\hatphi,\phobs)+\mathcal{L}_2(\hatphi,d)
+\end{align}
+$\mathcal{L}_1(\hatphi,\phobs)$ measures how well a certain candidate decomposition $\hatphi \in \R^{\nobs}\times \R^{\nmix}$ of fictitious phase measurements $\varphi_{kl}$ with wavelength $\lambda_k$ towards a surface in distance $d_l$ explains the observed mixed phases $\phobs$. $\mathcal{L}_2(\hatphi,d)$ in turn quantifies, how well any set of $\nmix$ distances $d_1, ..., d_{\nmix}$ explains the candidate decomposition $\hatphi$. The goal of Equation \eqref{eqn:abstract_optimization} is to find that decomposition $\hatphi$ into individual phases and the associated distances $d_1, ... ,d_{\nmix}$ that overall best fit the observed phases $\phobs$.
+If possible, both $\Lc_1$ and $\Lc_2$ should be interpretable as the likelihood of residuals. Under the assumption that the measurement uncertainty is independent of wavelength, examples of stochastically meaningful choices would be the $\ell^p$-norms $\|\cdot\|_p:\R^{\nobs}\rightarrow \R_+$
+\begin{align}
+\label{eqn:nonlinear_optimization}
+    \Lc_1=\|\varphi_{\text{mix}}(\hatphi)-\phobs\|_p^p ~~~~~& \Lc_2=\frac{1}{\nmix}\sum_{l=1}^{\nmix} \|\varphi(d_l)-\hatphi_l\|_p^p
+\end{align}
+of the phase residuals where $\varphi_{\text{mix}}(\hatphi) \in \R^{\nobs}$ with $k$-th entry $\arctan\left(\sum_{l=1}^{\nmix}w_l\sin\hatphi_{kl},\sum_{l=1}^{\nmix}w_l\cos\hatphi_{kl}\right)$, $\hatphi_l=\left[\hatphi_{1l}, ... ,\hatphi_{\nobs l}\right]^T\in \R^{\nobs} $ and $\varphi(d_l) \in \R^{\nobs}$ with $k$-th entry $\mod(2 \pi (d_l/\lambda_{k}),2\pi)-\pi$. This would correspond to assuming the phase residuals to be Laplace $(p=1)$, Gaussian $(p=2)$, or uniformly $(p=\infty)$ distributed XXXXXXX. The strong nonlinearities in the definition of $\varphi_{\text{mix}}(\hatphi)$ and $\varphi(d_l)$ w.r.t. the optimization variables $\hatphi$ and $d_1, ... ,d_{\text{mix}}$ necessitate a less stochastically rigorous but more analytically tractable approach featuring the $\ell^2$-norm for simplicity and the $\ell^1$-norm for robustness. We provide the following formulation for the joint ambiguity resolution and unmixing problem.
+
+
+
+\begin{align}
+    \min ~~~~& \underbrace{\|z-Qw\|_2^2}_{\mathcal{L}_1(\hatphi,w)}+\frac{1}{\nmix}\underbrace{\sum_{l=1}^{\nmix} \|2 \pi \left(2\Lambda^{-1} \vec{d}_l -\vec{N}_l\right)-\hat{\varphi}_l\|_1}_{\mathcal{L}_2(\hatphi,d,N)} \nonumber \\
+    s.t ~~~~& d_l\ge 0, w_l \ge 0 \text{ for } l=1, ...,\nmix \nonumber\\
+    \label{eqn:concrete_optimization}
+    &\vec{N}_l\in \N^{\nobs} \text{ for } l=1, ...,\nmix
+\end{align}
+Here $\Lambda$ is a diagonal $\nobs\times \nobs$ matrix with $(\Lambda)_{kl}=\delta_{kl}\lambda_k$, $\vec{d}_l=[d_l, ... ,d_l]^T\in \R^{\nobs}_+$ and $\vec{N}_l\in \N^{\nobs}$ with $(\vec{N}_l)_k=N_{kl}$. Most importantly, $\hatphi_l\in \R^{\nobs}$ is defined via $(\hatphi_l)_k=\varphi_{kl}$ and features also in the consistency term $\|z-Qw\|_2^2$ with $z=[a_1e^{i\varphi_1^{\text{obs}}}, ... ,a_1e^{i\varphi_{\nobs}^{\text{obs}}}]^T $ and $Qw=e^{i\hatphi}[w_1, ... ,w_{\nmix}]^T$. 
+
+This minimum is achieved when the decomposition $e^{i \hatphi}w$ is consistent to the measurements $z$ as indicated by the term $\Lc_1=\|z-e^{i\hatphi}w\|_2^2$ and well explainable by only $\nmix$ distances $d_1, ... ,d_{\nmix}$ leading to small average residuals $\nmix^{-1} \sum_{l=1}^{\nmix}\sum_{k=1}^{\nobs} |2 \pi (2 d_l/\lambda_k-N_{kl})-\hatphi_{kl}|$. Given any values $\tilde{d}_1, ... ,\tilde{d}_{\nmix}$ and $\tilde{w}_1, ... ,\tilde{w}_{\nmix}$ as well as the derived quantities $\tilde{N}_{kl}=\lfloor 2 \tilde{d}_l/\lambda_k\rfloor, \tilde{\varphi}_{kl}=2\pi(2\tilde{d}_l/\lambda_k-\tilde{N}_{kl})$ as the $kl$-th entries of the matrix $\tilde{\varphi}$, and noiseless observations $\tilde{z}=e^{i\tilde{\varphi}} \tilde{w}$, the objective function in Eq. \eqref{eqn:concrete_optimization} $\Lc=\Lc_1(\tilde{\varphi},\tilde{w})+\Lc_2(\tilde{\varphi},\tilde{d},\tilde{N})$ takes on the value $0$. This is a minimum since the objective function consists only of nonnegative terms.$\Lc$ assigns to a solution the correct minimum objective value and discourages solution candidates resulting in discrepancies although an increase in model flexibility (by assuming higher $\nmix$) comes at the cost of potentially nonunique solutions.
+
+
+Note that $\Lc_1=\|z-Qw\|_2^2$ can be rewritten entirely in terms of real-valued quantities $z_r\in \R^{2 \nobs}$ and $Q_r \in \R^{2 \nobs} \times \R^{\nmix}$ containing the real and imaginary parts of $z$ and $Q$ respectively as $\|z_r - Q_r w\|_2^2$ with
+\begin{align}
+\label{eqn:real_valued_formulation}
+z_r=\bbm \Re(z_1)  \\ \vdots \\ \Re(z_{\nobs}) \\ \Im(z_1) \\ \vdots \\ \Im(z_{\nobs})\ebm ~~~~&~~~~ Q_r=\bbm \cos \hatphi_{11} & \hdots & \cos \hatphi_{1 \nmix} \\ \vdots & \ddots & \vdots  \\ \cos \hatphi_{\nobs 1} & \cdots & \cos \hatphi_{\nobs \nmix} \\ \sin \hatphi_{11} & \hdots & \sin \hatphi_{1 \nmix} \\ \vdots & \ddots & \vdots  \\ \sin \hatphi_{\nobs 1} & \cdots & \sin \hatphi_{\nobs \nmix}  \ebm.
+\end{align}
+
+In practice, one swaps $\Lc(\hatphi,w)=\|z-Qw\|_2^2$ in Eq. \eqref{eqn:concrete_optimization} for $\|z_r -Q_r q\|_2^2$ in Eq. \eqref{eqn:real_valued_formulation} to avoid solver issues with complex numbers. Equation \eqref{eqn:concrete_optimization} is a mixed integer quadratic program with nonlinear constraints and can \textemdash according to the author's knowledge \textemdash not be solved in all generality. Two special cases are of immediate practical interest.
+\begin{itemize}
+    \item[] \textit{Ambiguity resolution problem} For $\nmix=1$, we showed in Eq.  \eqref{eqn:phi_optimal} that $\|\hatphi$ minimizing $z-Qw\|_2^2$ is given as $\hatphi = \phobs$. Solving for $d_1$ can then be done via solving the minimization problem
+    \begin{align}
+        \min ~~~&\|2\pi (2 \Lambda^{-1} \vec{d}_1 - \vec{N}_1) - \hatphi_1\|_1 \nonumber\\
+        \label{eqn:AR_problem}
+        s.t. ~~~& d_1 \ge 0 ~~~~\vec{N}_1 \in \N^{\nobs}
+    \end{align}
+    in the variables $d_1$ and $\vec{N}_1$. This is equivalent to a mixed integer linear program and solvable by publicly available algorithms.
+    
+    \item[] \textit{Mixed pixel resolution problem} For $\nmix =2$, Eq. \eqref{eqn:concrete_optimization} correspond to estimating two distances $d_1$ and $d_2$ separating emitter and surfaces $S_1, S_2$ such that a mixture of measurements to $S_1$ and $S_2$ best explains the observed phases. Instead of solving the joint ambiguity resolution and unmixing problem
+    \begin{align}
+        \min ~~~ & \|z_r -Q_r w \|_2^2 +\frac{1}{2} \left[ \| 2 \pi ( 2\Lambda^{-1} \vec{d}_1 - \vec{N}_1)-\hatphi_1\|_1+ \|2 \pi (2\Lambda^{-1} \vec{d}_2 -\vec{N}_2)-\hatphi_2 \|_1\right] \nonumber \\
+        s.t. ~~~ & d_1,d_2 \ge 0 ~~~~~~ w_1,w_2 \ge 0 ~~~~~~ \vec{N}_1,\vec{N}_2 \in \N^{\nobs}
+    \end{align}
+    in one step, one might aim for a block-coordinate-descent type approach XXXXXXXXXXX, in which the two sum $\Lc$ of the two terms $\Lc_1(\hatphi,w)$ and $\Lc_2(\hatphi,d,N)$ is optimized iteratively w.r.t. different sets of variables. Alternatively, one may employ knowledge about one of the distances $d_1$ or $d_2$ to reduce the variables in the problem; a strategy we will employ later.
+\end{itemize}
+
+
+\end{comment}
+
+\begin{comment}
+\section{The Elsevier article class}
+
+\paragraph{Installation} If the document class \emph{elsarticle} is not available on your computer, you can download and install the system package \emph{texlive-publishers} (Linux) or install the \LaTeX\ package \emph{elsarticle} using the package manager of your \TeX\ installation, which is typically \TeX\ Live or Mik\TeX.
+
+\paragraph{Usage} Once the package is properly installed, you can use the document class \emph{elsarticle} to create a manuscript. Please make sure that your manuscript follows the guidelines in the Guide for Authors of the relevant journal. It is not necessary to typeset your manuscript in exactly the same way as an article, unless you are submitting to a camera-ready copy (CRC) journal.
+
+\paragraph{Functionality} The Elsevier article class is based on the standard article class and supports almost all of the functionality of that class. In addition, it features commands and options to format the
+\begin{itemize}
+\item document style
+\item baselineskip
+\item front matter
+\item keywords and MSC codes
+\item theorems, definitions and proofs
+\item lables of enumerations
+\item citation style and labeling.
+\end{itemize}
+
+\section{Front matter}
+
+The author names and affiliations could be formatted in two ways:
+\begin{enumerate}[(1)]
+\item Group the authors per affiliation.
+\item Use footnotes to indicate the affiliations.
+\end{enumerate}
+See the front matter of this document for examples. You are recommended to conform your choice to the journal you are submitting to.
+
+\end{comment}
+
+\begin{comment}
+$x +_{mod} y$\\
+$+_{\operatorname{mod}}:(x,y) \mapsto (x+y, mod 2 \pi)$
+$\lceil d/ lambda \rceil$
+\end{comment}
+
+\bibliography{biblio,biblioIntro}
+
+
+
+\end{document}

@@ -1,0 +1,14 @@
+Solve for the Newton direction by solving the full system of eqns
+
+        ############
+        # n_c=np.shape(A)[0]     
+        # grad=(n_obs-r)*gamma_plus-n_obs*gamma_plus@S_psi@gamma_plus+r*Lambda_p_inv
+        # targ_vec=np.vstack((-np.reshape(grad,[n_exp**2,1]),np.zeros([n_c,1])))
+
+        # Top_mat=np.hstack(((B_gg,A.T)))
+        # Bot_mat=np.hstack((A,np.zeros([n_c,n_c])))
+        # Full_eqn=np.vstack((Top_mat,Bot_mat))
+        # soln=lina.lstsq(Full_eqn, targ_vec)
+        
+        # Delta_gamma_total=np.reshape(soln[0][:n_exp**2],[n_exp,n_exp])
+        ###########
