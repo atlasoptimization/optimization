@@ -5,7 +5,8 @@ The goal of this script is to showcase how cvxpylayers can be used to learn
 constraints that are intrinsically hidden in data. This includes generating
 data that adhere to upper and lower bounds and then fitting a probability
 distribution in pyro that is subseded by a projection operator implemented in 
-cvxpylayers.
+cvxpylayers. The samples are timeseries and the upper and lower bounds depend
+on time.
 For this, do the following:
     1. Imports and definitions
     2. Simulate data
@@ -35,8 +36,10 @@ import matplotlib.pyplot as plt
 
 # ii) Definitions
 
-n_data = 10
-index_data = torch.linspace(0,n_data,n_data)
+n_samples = 50
+n_times = 10
+time = torch.linspace(0,1,n_times)
+index_data = torch.linspace(0,n_samples,n_samples)
 
 
 
@@ -50,15 +53,15 @@ index_data = torch.linspace(0,n_data,n_data)
 mu = 0
 sigma = 1
 
-ub = 1
-lb = -1
+ub = 2*(0.25+(time-0.5)**2)
+lb = -2*(0.25+(time-0.5)**2)
 
 
 # ii) Simulate data
 
-data_unbounded = torch.normal(mu, sigma, [n_data,1])
-data_bounded = torch.maximum(data_unbounded, torch.tensor(lb))
-data_bounded = torch.minimum(data_bounded, torch.tensor(ub))
+data_unbounded = torch.normal(mu, sigma, [n_samples, n_times])
+data_bounded = torch.maximum(data_unbounded, lb)
+data_bounded = torch.minimum(data_bounded, ub)
 
 
 
@@ -69,14 +72,14 @@ data_bounded = torch.minimum(data_bounded, torch.tensor(ub))
 
 # i) Define forward projection
 
-bounds = cp.Parameter(shape = (2,))
-x_in = cp.Parameter(shape = (1,))
-x_out = cp.Variable(shape = (1,))
+bounds = cp.Parameter(shape = ([2,n_times]))
+x_in = cp.Parameter(shape = (n_times,))
+x_out = cp.Variable(shape = (n_times,))
 
 # x_out = argmin ||x_in - x||  s.t. x in bounds
 # goal: project x_in into bounds
 objective = cp.Minimize(cp.norm(x_in - x_out, p =1) + cp.norm(bounds,p = 1))
-cons = [x_out >= bounds[0], x_out <= bounds[1]]
+cons = [x_out >= bounds[0,:], x_out <= bounds[1,:]]
 
 problem = cp.Problem(objective, cons)
 
@@ -88,7 +91,10 @@ layer = CvxpyLayer(problem = problem, parameters = [bounds, x_in], variables = [
 # Initialize bounds_torch as the parameter w.r.t which grads are computed
 # Parameter bounds is placeholder, later on process bounds_torch into bounds
 # and pass to layer to compute loss.
-bounds_torch = torch.tensor([-0.5, +0.5], requires_grad = True)
+bounds_torch_ub = 0.5*torch.ones([1,n_times])
+bounds_torch_lb = -0.5*torch.ones([1,n_times])
+
+bounds_torch = torch.vstack((bounds_torch_lb, bounds_torch_ub)).requires_grad_(True)
 
 
 
@@ -103,12 +109,14 @@ def model(data = None):
     # Set up parameters
     mu = pyro.param("mu", init_tensor = torch.tensor([1.0]))
     sigma = pyro.param("sigma", init_tensor = torch.tensor([3.0]))
-    bounds = pyro.param("bounds", init_tensor = torch.tensor([-0.5, +0.5]))
+    bounds_torch_ub = 0.5*torch.ones([1,n_times])
+    bounds_torch_lb = -0.5*torch.ones([1,n_times])
+    bounds = pyro.param("bounds", init_tensor = torch.vstack((bounds_torch_lb, bounds_torch_ub)))
     
     # Define intermediate observation distribution (pre-projection)
-    extension_tensor = torch.ones([n_data,1])
+    extension_tensor = torch.ones([n_samples,n_times])
     subobs_dist = pyro.distributions.Normal(extension_tensor*mu, sigma).to_event(1)
-    with pyro.plate("batch_plate", size = n_data, dim = -1):
+    with pyro.plate("batch_plate", size = n_samples, dim = -1):
         subobs = pyro.sample("subobs", subobs_dist)
         
         # Define observation distribution (post-projection)
@@ -142,7 +150,7 @@ guide = pyro.infer.autoguide.AutoNormal(model)
 pyro.clear_param_store()
 
 # specifying scalar options
-learning_rate = 1e-1
+learning_rate = 3e-2
 num_epochs = 200
 adam_args = {"lr" : learning_rate}
 
@@ -204,16 +212,16 @@ k_2 = round(num_epochs/3)
 k_3 = num_epochs-1
 
 fig, axs = plt.subplots(4, 1, figsize=(12, 12))
-axs[0].plot(index_data, data_bounded.flatten().detach())
+axs[0].plot(time, data_bounded.detach().T)
 axs[0].set_title('Original data')
 
-axs[1].plot(index_data, x_out_history[k_1].flatten().detach())
+axs[1].plot(time, x_out_history[k_1].detach().T)
 axs[1].set_title('Projected data; epoch = {}'.format(k_1))
 
-axs[2].plot(index_data, x_out_history[k_2].flatten().detach())
+axs[2].plot(time, x_out_history[k_2].detach().T)
 axs[2].set_title('Projected data; epoch = {}'.format(k_2))
 
-axs[3].plot(index_data, x_out_history[k_3].flatten().detach())
+axs[3].plot(time, x_out_history[k_3].detach().T)
 axs[3].set_title('Projected data; epoch = {}'.format(k_3))
 
 plt.tight_layout()
